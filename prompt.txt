@@ -1,0 +1,126 @@
+Assign a single short category for each merchant name below.
+Return only the category names, one per line, in the same order.
+Merchant: MEMBERSHIP FEE INSTALLMENT
+Category:
+Merchant: ADIDAS                  WOODBRIDGE
+Category:
+Merchant: GLASSBOX QUEEN STREET   TORONTO
+Category:
+Merchant: IRISH DESIGN HOUSE 00-0 TORONTO
+Category:
+Merchant: DE MELLO COFFEE - BLOOR Toronto
+Category:
+Merchant: PRESTO FARE/RLWKM8LK76  TORONTO
+Category:
+Merchant: TST-TAHINI'S - 1949 KI  TORONTO
+Category:
+Merchant: DOLLARAMA # 736         TORONTO
+Category:
+Merchant: PRESTO FARE/RLLM29TFGZ  TORONTO
+Category:
+Merchant: FREE TIMES CAFE LTD 222 TORONTO
+Category:
+Merchant: MARCHE LEO'S MARKET 212 TORONTO
+Category:
+Merchant: DOCBRACES TORONTO (BLO  TORONTO
+Category:
+Merchant: ELIT CARE               NORTH VANCOUVER
+Category:
+Merchant: TICKETMASTER CANADA HOS TORONTO
+Category:
+Merchant: BOTTEGA VOLO            Toronto
+Category:
+Merchant: PRESTO FARE/RKSMDCJ6KD  TORONTO
+Category:
+Merchant: SP KNIFEWEAR NEWKNIFED  CALGARY
+Category:
+Merchant: VIA RAIL/QBVTM9         MONTREAL
+Category:
+Merchant: AGENDA CAFE             TORONTO
+Category:
+Merchant: PRESTO FARE/RKM2C28RXW  TORONTO
+Category:
+Merchant: DARK HORSE ESPRESSO     MISSISSAUGA
+Category:
+Merchant: PAYMENT RECEIVED - THANK YOU
+Category:
+Merchant: EB *TUFF 2026-FLOWERS   TORONTO
+Category:
+Merchant: EB *TUFF 2026-SHORT FI  TORONTO
+Category:
+Merchant: FUEL+                   Toronto
+Category:
+Merchant: PRESTO FARE/RJZB6QDC5N  TORONTO
+Category:
+Merchant: AMAZON.CA               866-216-1072
+Category:
+Merchant: FOUNDATION PHYSIOTHERA  TORONTO
+Category:
+Merchant: PRESTO FARE/RJP8W9M2BV  TORONTO
+Category:
+Merchant: BIKE SHARE TORONTO PARK TORONTO
+Category:
+Merchant: IKEA TORONTO DOWNTOWN 6 TORONTO
+Category:
+Merchant: PRESTO FARE/RJJ9FMTXDD  TORONTO
+Category:
+Merchant: DNISTER UKRAINIAN STORE TORONTO
+Category:
+Merchant: EATALY TORONTO          TORONTO
+Category:
+Merchant: LA BOU.F.MEATS INC QCO  TORONTO
+Category:
+Merchant: SDM 8826                TORONTO
+Category:
+Merchant: PRESTO FARE/RHQVFS5PQQ  TORONTO
+Category:
+Merchant: UBER TRIP               TORONTO
+Category:
+Merchant: DOORDASHGUSTO501        DOWNTOWN TORONT
+Category:
+Merchant: FRESH ONE MARKET 001    TORONTO
+Category:
+Merchant: PRESTO FARE/RHLBP2M5N6  TORONTO
+Category:
+Merchant: TOKRI INC. O/A YELLOW D Toronto
+Category:
+Merchant: TOO GOOD TO GO CANADA T VANCOUVER
+Category:
+Merchant: HOTEL ON BOOKING.COM    AMSTERDAM
+Category:
+Merchant: PRESTO FARE/RHG9RWWCHG  TORONTO
+Category:
+Merchant: PRESTO FARE/RH7G97XBPN  TORONTO
+Category:
+Merchant: TIM HORTONS #4215#QTH   MISSISSAUGA
+Category:
+Merchant: LITTLE HARVEST MARKET 0 TORONTO
+Category:
+Merchant: PRESTO FARE/RGXLQLSX96  TORONTO
+Category:
+Merchant: 470 YONGE               TORONTO
+Category:
+Merchant: BALZAC'S COFFEE LTD TOR TORONTO
+Category:
+Merchant: CITY OF TORONTO FERRY D TORONTO
+Category:
+Merchant: PRESTO FARE/RGSHHXS85K  TORONTO
+Category:
+Merchant: PRESTO FARE/RGKJW7J7VR  TORONTO
+Category:
+Merchant: JONGRO 001              TORONTO
+Category:
+Merchant: PRESTO FARE/RGGHP5KFJB  TORONTO
+Category:
+Merchant: DOMINO'S PIZZA #1049    TORONTO
+Category:
+Merchant: PRESTO FARE/RG9QNN5XNQ  TORONTO
+Category:
+Merchant: INDIGO 287              TORONTO
+Category:
+Merchant: INDIGO 983              TORONTO
+Category:
+Merchant: PRESTO FARE/RFG6MBNBRN  TORONTO
+Category:
+Merchant: BLACKBIRD BAKING CO. R  TORONTO
+Category:
