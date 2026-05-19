@@ -1,4 +1,4 @@
-Assign a single short category for each merchant name below.
+Assign a single short category for each merchant name below. Choose the best fit from this exact list: Groceries, Transport, Eating out, Health & Wellness, Fun stuff, Gifts, Travel, Clothes, Charity, Other
 Return only the category names, one per line, in the same order.
 Merchant: MEMBERSHIP FEE INSTALLMENT
 Category:
