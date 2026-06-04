@@ -9,9 +9,9 @@ TRANSACTION_SCHEMA = [
     "merchant",
     "amount",
     "account",
-    "notes",
     "category",
     "source_file",
+    "notes",
 ]
 
 Transaction = {
@@ -64,8 +64,7 @@ def detect_source(df):
 
 def build_transaction_frame(df, source_file, source_type):
     raw = df.copy()
-
-    # raw = raw[~(raw["merchant"].str.contains("THANK YOU", case=False, na=False))]
+    length = len(raw)
 
     date_series = raw.get("Transaction Date")
     if date_series is None:
@@ -73,7 +72,7 @@ def build_transaction_frame(df, source_file, source_type):
     if date_series is None:
         raise ValueError("Date column not found in uploaded CSV file")
         # print("Date column not found in uploaded CSV file")
-        
+    date_parsed = parse_date(date_series, length=length)
 
     merchant_series = raw.get("Merchant")
     if merchant_series is None:
@@ -95,7 +94,7 @@ def build_transaction_frame(df, source_file, source_type):
         raise ValueError("Amount column not found in uploaded CSV file")
         # print("Amount column not found in uploaded CSV file")
 
-    length = len(raw)
+    
     merchant_clean = safe_text(merchant_series, length=length)
     amount_parsed = normalize_amount(amount_series)
     if source_type == "RBC":
@@ -106,15 +105,22 @@ def build_transaction_frame(df, source_file, source_type):
         dtype="string"
     )
 
+    if 'date' in df.columns:
+        max_date = pd.to_datetime(df['date']).max()
+    else:
+        max_date = pd.Timestamp.now()
+
+    new_source_file_name = f"{source_type}_{date_parsed.max().strftime('%Y%m%d')}_{date_parsed.min().strftime('%Y%m%d')}.csv"
+
     parsed = pd.DataFrame(
         {
-            "date": parse_date(date_series, length=length),
+            "date": date_parsed,
             "merchant": merchant_clean,
             "amount": amount_parsed,
             "account": pd.Series([source_type] * length, dtype="string"),
-            "notes": pd.Series([""] * length, dtype="string"),
             "category": category_series,
-            "source_file": pd.Series([source_file] * length, dtype="string"),
+            "notes": pd.Series([""] * length, dtype="string"),
+            "source_file": pd.Series([new_source_file_name] * length, dtype="string"),
         }
     )
     parsed = parsed[TRANSACTION_SCHEMA]
