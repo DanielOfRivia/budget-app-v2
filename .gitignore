@@ -9,8 +9,8 @@ wheels/
 # Virtual environments
 .venv
 
-# Local secrets
-.env
-
 # Streamlit secrets
 .streamlit/
+
+# logs
+logs/

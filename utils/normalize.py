@@ -1,8 +1,4 @@
-import hashlib
-
 import pandas as pd
-
-from gemini_category import categorize_merchants
 
 TRANSACTION_SCHEMA = [
     "date",
@@ -99,11 +95,6 @@ def build_transaction_frame(df, source_file, source_type):
     amount_parsed = normalize_amount(amount_series)
     if source_type == "RBC":
         amount_parsed = -amount_parsed
-    # print(len(categorize_merchants(tuple(merchant_clean))), len(merchant_clean))
-    # category_series = pd.Series(
-    #     categorize_merchants(tuple(merchant_clean)),
-    #     dtype="string"
-    # )
 
     if 'date' in df.columns:
         max_date = pd.to_datetime(df['date']).max()

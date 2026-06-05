@@ -2,9 +2,8 @@ import functools
 import os
 from typing import Any
 from google import genai
-from google.genai import types
-import time
 import streamlit as st
+from pathlib import Path
 
 
 def _extract_response_text(response: Any) -> str:
@@ -46,7 +45,7 @@ def _extract_response_text(response: Any) -> str:
     return ""
 
 
-def _run_gemini_request(prompt: str) -> str:
+def _run_gemini_request(prompt: str, LOGS_DIR: Path) -> str:
     try:
         api_key = st.secrets["GEMINI_API_KEY"]
     except KeyError:
@@ -65,7 +64,7 @@ def _run_gemini_request(prompt: str) -> str:
             model=model,
             contents=prompt
         )
-        with open("raw_response.txt", "w", encoding="utf-8") as file:
+        with open(LOGS_DIR / "raw_response.txt", "w", encoding="utf-8") as file:
             file.write(str(response))
         return _extract_response_text(response)
     except Exception as exc:
@@ -86,6 +85,13 @@ def _build_batch_prompt(merchant_names):
 
 @functools.lru_cache(maxsize=256)
 def categorize_merchants(merchants: tuple):
+
+    CURRENT_SCRIPT = Path(__file__).resolve()
+    PROJECT_ROOT = CURRENT_SCRIPT.parent.parent
+    LOGS_DIR = PROJECT_ROOT / "logs"
+    LOGS_DIR.mkdir(exist_ok=True)
+    prompt_file_path = LOGS_DIR / "prompt.txt"
+
     cleaned = [str(m or "").strip() for m in merchants]
     if not cleaned:
         return []
@@ -100,17 +106,12 @@ def categorize_merchants(merchants: tuple):
         return [""] * len(cleaned)
     
     prompt = _build_batch_prompt(unique_order)
-    with open("prompt.txt", "w", encoding="utf-8") as file:
+    with open(LOGS_DIR / "prompt.txt", "w", encoding="utf-8") as file:
         file.write(prompt)
         
-    # temporary to not run api during development, will read from response.txt if it exists
-    if os.path.exists("response.txt") and False:
-        with open("response.txt", "r", encoding="utf-8") as file:
-            raw_output = file.read()
-    else:
-        raw_output = _run_gemini_request(prompt)
-        with open("response.txt", "w", encoding="utf-8") as file:
-            file.write(raw_output)
+    raw_output = _run_gemini_request(prompt, LOGS_DIR)
+    with open(LOGS_DIR / "response.txt", "w", encoding="utf-8") as file:
+        file.write(raw_output)
     categories = [line.strip() for line in str(raw_output).splitlines() if line.strip()]
 
     result_map = {}

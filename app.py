@@ -1,9 +1,9 @@
 import streamlit as st
 import pandas as pd
-from normalize import build_transaction_frame, detect_source
-from google_api import save_to_gdrive_and_sheets
+from utils.normalize import build_transaction_frame, detect_source
+from utils.google_api import save_to_gdrive_and_sheets
 from google.api_core.exceptions import DeadlineExceeded
-from gemini_category import categorize_merchants
+from utils.gemini_category import categorize_merchants
 
 def toggle_table_visibility(session_state_key):
     st.session_state[session_state_key] = not st.session_state[session_state_key]
