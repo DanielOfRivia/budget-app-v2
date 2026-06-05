@@ -100,10 +100,10 @@ def build_transaction_frame(df, source_file, source_type):
     if source_type == "RBC":
         amount_parsed = -amount_parsed
     # print(len(categorize_merchants(tuple(merchant_clean))), len(merchant_clean))
-    category_series = pd.Series(
-        categorize_merchants(tuple(merchant_clean)),
-        dtype="string"
-    )
+    # category_series = pd.Series(
+    #     categorize_merchants(tuple(merchant_clean)),
+    #     dtype="string"
+    # )
 
     if 'date' in df.columns:
         max_date = pd.to_datetime(df['date']).max()
@@ -118,7 +118,7 @@ def build_transaction_frame(df, source_file, source_type):
             "merchant": merchant_clean,
             "amount": amount_parsed,
             "account": pd.Series([source_type] * length, dtype="string"),
-            "category": category_series,
+            "category": pd.Series([""] * length, dtype="string"), #category_series,
             "notes": pd.Series([""] * length, dtype="string"),
             "source_file": pd.Series([new_source_file_name] * length, dtype="string"),
         }

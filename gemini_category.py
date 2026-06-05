@@ -1,8 +1,10 @@
 import functools
 import os
 from typing import Any
-
 from google import genai
+from google.genai import types
+import time
+import streamlit as st
 
 
 def _extract_response_text(response: Any) -> str:
@@ -45,17 +47,23 @@ def _extract_response_text(response: Any) -> str:
 
 
 def _run_gemini_request(prompt: str) -> str:
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
+    try:
+        api_key = st.secrets["GEMINI_API_KEY"]
+    except KeyError:
         print("GEMINI_API_KEY not set")
         return ""
 
-    model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+    try:
+        model = st.secrets["GEMINI_MODEL"]
+    except KeyError:
+        print("GEMINI_MODEL not set")
+        return ""
+
     try:
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
             model=model,
-            contents=prompt,
+            contents=prompt
         )
         with open("raw_response.txt", "w", encoding="utf-8") as file:
             file.write(str(response))
@@ -88,17 +96,15 @@ def categorize_merchants(merchants: tuple):
         if merchant not in seen:
             seen[merchant] = None
             unique_order.append(merchant)
-
-    non_empty = [m for m in unique_order if m]
-    if not non_empty:
+    if not unique_order:
         return [""] * len(cleaned)
-
-    prompt = _build_batch_prompt(non_empty)
+    
+    prompt = _build_batch_prompt(unique_order)
     with open("prompt.txt", "w", encoding="utf-8") as file:
         file.write(prompt)
         
     # temporary to not run api during development, will read from response.txt if it exists
-    if os.path.exists("response.txt"):
+    if os.path.exists("response.txt") and False:
         with open("response.txt", "r", encoding="utf-8") as file:
             raw_output = file.read()
     else:
@@ -108,9 +114,9 @@ def categorize_merchants(merchants: tuple):
     categories = [line.strip() for line in str(raw_output).splitlines() if line.strip()]
 
     result_map = {}
-    for merchant, category in zip(non_empty, categories):
+    for merchant, category in zip(unique_order, categories):
         result_map[merchant] = category
-    for merchant in non_empty[len(categories):]:
+    for merchant in unique_order[len(categories):]:
         result_map[merchant] = ""
 
     return [result_map.get(m, "") if m else "" for m in cleaned]

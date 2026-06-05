@@ -1,32 +1,64 @@
 Assign a single short category for each merchant name below. Choose the best fit from this exact list: Groceries, Transport, Eating out, Health & Wellness, Fun stuff, Gifts, Travel, Clothes, Charity, Other
 Return only the category names, one per line, in the same order.
-Merchant: ROCCO'S NO FRILLS #364 TORONTO
+Merchant: FOUND COFFEE   FRONT    Toronto
 Category:
-Merchant: MARKET SQUARE - IMAGIN TORONTO
+Merchant: MEMBERSHIP FEE INSTALLMENT
 Category:
-Merchant: IMAGINE CINEMAS MARKET TORONTO
+Merchant: MARCHE LEO'S MARKET 212 TORONTO
 Category:
-Merchant: LIQPAY*DICENTRA KIYIV
+Merchant: SDM 8826                TORONTO
 Category:
-Merchant: MEGABUS CANADA ONTARIO
+Merchant: SP SOUNDCORE CA         VANCOUVER
 Category:
-Merchant: AUTOMATIC PAYMENT -THANK YOU
+Merchant: LULA LOUNGE             Toronto
 Category:
-Merchant: PRESTO FARE/RHRGXXZDBX TORONTO
+Merchant: PRESTO FARE/RDCZLT6VD7  TORONTO
 Category:
-Merchant: IKKOUSHA RAMEN CHICKEN TORONTO
+Merchant: PRESTO FARE/RD7XGKVZ5L  TORONTO
 Category:
-Merchant: FAMILY FOOD MARKET TORONTO
+Merchant: IMMIGRATION CANADA ONLI OTTAWA
 Category:
-Merchant: FUTURE BAKERY & CAFE Toronto
+Merchant: PRESTO FARE/RCRVFP7J8R  TORONTO
 Category:
-Merchant: SALARMY LESLIEVILLE TS TORONTO
+Merchant: PRESTO FARE/RCLVV55SG8  TORONTO
 Category:
-Merchant: DAMIANO'S NF TORONTO 7 TORONTO
+Merchant: TOO GOOD TO GO CANADA T VANCOUVER
 Category:
-Merchant: OCT*L4P2YZ8O26R1QY OTTAWA
+Merchant: LYFT   *RIDE SUN 11PM   VANCOUVER
 Category:
-Merchant: OCT*NJ5KY7KQ8RX36N OTTAWA
+Merchant: PI CO.                  Toronto
 Category:
-Merchant: CANADIAN MUSEUM OF HIS 819-776-7000
+Merchant: PRESTO FARE/RBX62LPCRT  TORONTO
+Category:
+Merchant: SWEAT AND TONIC         TORONTO
+Category:
+Merchant: SWEATANDTO* TONIC SPA   TORONTO
+Category:
+Merchant: BBYMARKETPLACE*PRO OPEN BURNABY
+Category:
+Merchant: DARK HORSE ESPRESSO     MISSISSAUGA
+Category:
+Merchant: AMAZON.CA*BP3W064B0     866-216-1072
+Category:
+Merchant: PRESTO FARE/RB52DTVRKX  TORONTO
+Category:
+Merchant: CKO*G2A.COM 204071      NOORD-HOLLAND
+Category:
+Merchant: CKO*G2A.COM 204076      NOORD-HOLLAND
+Category:
+Merchant: GIGPASS.IO              TORONTO
+Category:
+Merchant: PRESTO FARE/R8KVVFFXD2  TORONTO
+Category:
+Merchant: REXALL PHARMACY #0257 T TORONTO
+Category:
+Merchant: TST-BHC - TORONTO       TORONTO
+Category:
+Merchant: UNCLE TETSU JAPANESE CH TORONTO
+Category:
+Merchant: PRESTO FARE/R8DTHJV9S7  TORONTO
+Category:
+Merchant: SHOPAGO                 TORONTO
+Category:
+Merchant: PRESTO FARE/R7ZKVR5FJC  TORONTO
 Category:

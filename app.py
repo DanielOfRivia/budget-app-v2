@@ -2,7 +2,8 @@ import streamlit as st
 import pandas as pd
 from normalize import build_transaction_frame, detect_source
 from google_api import save_to_gdrive_and_sheets
-
+from google.api_core.exceptions import DeadlineExceeded
+from gemini_category import categorize_merchants
 
 def toggle_table_visibility(session_state_key):
     st.session_state[session_state_key] = not st.session_state[session_state_key]
@@ -23,9 +24,9 @@ standardized = pd.DataFrame()  # Initialize an empty DataFrame to hold the combi
 
 st.set_page_config(page_title="CSV Preview App", layout="wide")
 st.title("Budget monthly update")
-st.markdown(
-    "Upload a CSV file and preview it. The app will identify if it's an AMEX or RBC export and normalize transactions."
-)
+# st.markdown(
+#     "Upload a CSV file and preview it. The app will identify if it's an AMEX or RBC export and normalize transactions."
+# )
 
 uploaded_files = st.file_uploader(
     "Upload transaction CSV", type=["csv"], key="csv", accept_multiple_files=True, 
@@ -33,6 +34,7 @@ uploaded_files = st.file_uploader(
 )
 
 if uploaded_files:
+    # Process each uploaded file and combine them into a single DataFrame
     for i, uploaded_file in enumerate(uploaded_files):
         try:
             df = pd.read_csv(uploaded_file)
@@ -40,15 +42,36 @@ if uploaded_files:
             st.error(f"Unable to read CSV file: {e}")
             continue
         source_type = detect_source(df)
-        standardized = pd.concat([standardized, build_transaction_frame(df, uploaded_file.name or "uploaded_file.csv", source_type)], ignore_index=True)
+        standardized = pd.concat([standardized, build_transaction_frame(df, uploaded_file.name or "uploaded_file.csv", source_type)], ignore_index=True)    
 
-        # Show the original table
+    # Store the combined processed DataFrame in session state for later use
+    if "main_df" not in st.session_state or st.session_state.main_df is None:
+        #run gemini categorization on the combined merchant list to get categories for all transactions
+        try:
+            with st.spinner("Assigning categories to transactions…"):
+                category_series = pd.Series(
+                    categorize_merchants(tuple(standardized["merchant"])),
+                    dtype="string"
+                )
+                standardized["category"] = category_series
+            st.session_state.main_df = standardized.copy().reset_index()
+
+        except DeadlineExceeded:
+            st.error("⏱️ AI Generation Timed Out. Please try again.")
+            st.session_state.csv = None  # Reset the file uploader to allow re-uploading
+
+        except Exception as e:
+            st.error(f"An error occurred during AI categorization: {e}")
+            st.session_state.csv = None  # Reset the file uploader to allow re-uploading
+    
+    # Show the original table
+    for i, uploaded_file in enumerate(uploaded_files):
         if f"show_original_{i}" not in st.session_state:
             st.session_state[f"show_original_{i}"] = False
         card_label = f"{source_type} card ({uploaded_file.name or 'uploaded_file.csv'})"
         original_button_label = (f"Hide original table for {card_label}" 
-                                 if st.session_state[f"show_original_{i}"] 
-                                 else f"Show original table for {card_label}")
+                                if st.session_state[f"show_original_{i}"] 
+                                else f"Show original table for {card_label}")
         st.button(
             original_button_label, 
             key=f"show_original_button_{i}", 
@@ -56,16 +79,9 @@ if uploaded_files:
             args=(f"show_original_{i}",)  # Passes the session state key to the callback function
         )
 
-        if st.session_state[f"show_original_{i}"]:
-            st.dataframe(df,)
+    if st.session_state[f"show_original_{i}"]:
+        st.dataframe(df,)
 
-
-
-    #This code is not file specific 
-
-    # Store the combined processed DataFrame in session state for later use
-    if "main_df" not in st.session_state or st.session_state.main_df is None:
-        st.session_state.main_df = standardized.copy().reset_index()
     # Show the processed table with editable category column
     if f"show_processed" not in st.session_state:
         st.session_state[f"show_processed"] = False

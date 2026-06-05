@@ -4,84 +4,52 @@ sdk_http_response=HttpResponse(
   content=Content(
     parts=[
       Part(
-        text="""Other
-Clothes
+        text="""Eating out
+Other
+Groceries
 Health & Wellness
+Fun stuff
+Eating out
+Transport
+Transport
+Other
+Transport
+Transport
+Eating out
+Transport
+Eating out
+Transport
+Health & Wellness
+Health & Wellness
+Groceries
+Eating out
 Gifts
-Eating out
-Transport
-Eating out
-Other
-Transport
-Eating out
-Groceries
-Health & Wellness
-Health & Wellness
-Fun stuff
-Groceries
-Transport
-Other
-Travel
-Eating out
-Transport
-Eating out
-Other
-Fun stuff
-Fun stuff
-Eating out
-Transport
-Other
-Health & Wellness
-Transport
-Transport
-Other
-Transport
-Groceries
-Groceries
-Groceries
-Health & Wellness
-Transport
-Transport
-Eating out
-Groceries
-Transport
-Eating out
-Eating out
-Travel
-Transport
-Transport
-Eating out
-Groceries
-Transport
-Health & Wellness
-Eating out
-Transport
-Transport
-Transport
-Eating out
-Transport
-Eating out
 Transport
 Fun stuff
 Fun stuff
+Fun stuff
 Transport
-Groceries""",
-        thought_signature=b'\x12\x95a\n\x92a\x01\x0c9\xd6\xc7w6#\xc3\xaa\xfd c\x8b\xa8\xeb\x87`\x07am"&<\x12\x12L\xa8\x97\x11\x9b\x00\xfdR\xd3b\xac\xab\x1a\xc4$\xa2\xedM\\\x86`c|U(\xf6\xbe\xab,`\xdd8\xca;\x0f.;\xca\x01HJ\x7f0X\xc9\t\xc1\x9f\x8byQ\xe4\xdb\xc47\xf2<J\xf3\'{\xd7\xb2@5...'
+Health & Wellness
+Eating out
+Eating out
+Transport
+Clothes
+Transport""",
+        thought_signature=b'\x124\n2\x01\x0c9\xd6\xc7@A\x8bJ\x9f\x99\x84i\x13\xb6\xed\x7f\xb8]\xc4\xab\xa9\xa9\x9dY$\x17\xaf0\x87W\x12Y\xf2\x7f\x8c+\x05\x01\x06\xab\xb7\xd2\xed\xb1\xc6\xe5\x0b\x03\xc9'
       ),
     ],
     role='model'
   ),
   finish_reason=<FinishReason.STOP: 'STOP'>,
   index=0
-)] create_time=None model_version='gemini-3-flash-preview' prompt_feedback=None response_id='YY8Lav6SNYzP_uMPl4zS0QI' usage_metadata=GenerateContentResponseUsageMetadata(
-  candidates_token_count=162,
-  prompt_token_count=1147,
+)] create_time=None model_version='gemini-3.1-flash-lite' prompt_feedback=None response_id='NTciasnnE-Sc1MkPpYKc8Q8' usage_metadata=GenerateContentResponseUsageMetadata(
+  candidates_token_count=83,
+  prompt_token_count=628,
   prompt_tokens_details=[
     ModalityTokenCount(
       modality=<MediaModality.TEXT: 'TEXT'>,
-      token_count=1147
+      token_count=628
     ),
   ],
-  thoughts_token_count=3855,
-  total_token_count=5164
+  total_token_count=711
 ) model_status=None automatic_function_calling_history=[] parsed=None
