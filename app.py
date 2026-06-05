@@ -35,14 +35,20 @@ uploaded_files = st.file_uploader(
 
 if uploaded_files:
     # Process each uploaded file and combine them into a single DataFrame
+    raw_dfs = []
+
     for i, uploaded_file in enumerate(uploaded_files):
         try:
             df = pd.read_csv(uploaded_file)
         except Exception as e:
             st.error(f"Unable to read CSV file: {e}")
             continue
+        raw_dfs.append((df, uploaded_file.name or f"uploaded_file_{i}.csv"))
+
+    # Combine all processed DataFrames
+    for df, file_name in raw_dfs:
         source_type = detect_source(df)
-        standardized = pd.concat([standardized, build_transaction_frame(df, uploaded_file.name or "uploaded_file.csv", source_type)], ignore_index=True)    
+        standardized = pd.concat([standardized, build_transaction_frame(df, file_name, source_type)], ignore_index=True)
 
     # Store the combined processed DataFrame in session state for later use
     if "main_df" not in st.session_state or st.session_state.main_df is None:
@@ -65,10 +71,13 @@ if uploaded_files:
             st.session_state.csv = None  # Reset the file uploader to allow re-uploading
     
     # Show the original table
-    for i, uploaded_file in enumerate(uploaded_files):
+    for i in range(len(raw_dfs)):
         if f"show_original_{i}" not in st.session_state:
             st.session_state[f"show_original_{i}"] = False
-        card_label = f"{source_type} card ({uploaded_file.name or 'uploaded_file.csv'})"
+        df = raw_dfs[i][0]
+        file_name = raw_dfs[i][1]
+        source_type = detect_source(df)
+        card_label = f"{source_type} card ({file_name})"
         original_button_label = (f"Hide original table for {card_label}" 
                                 if st.session_state[f"show_original_{i}"] 
                                 else f"Show original table for {card_label}")
@@ -79,8 +88,8 @@ if uploaded_files:
             args=(f"show_original_{i}",)  # Passes the session state key to the callback function
         )
 
-    if st.session_state[f"show_original_{i}"]:
-        st.dataframe(df,)
+        if st.session_state[f"show_original_{i}"]:
+            st.dataframe(df,)
 
     # Show the processed table with editable category column
     if f"show_processed" not in st.session_state:
