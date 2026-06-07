@@ -106,6 +106,7 @@ if uploaded_files:
 
     edited_df = None
     category_column_configuration = {
+            "date": st.column_config.DateColumn("date"),
             "category": st.column_config.SelectboxColumn(
                 "category", # The label displayed at the top of the column
                 help="Select the category for this item",
