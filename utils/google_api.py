@@ -23,7 +23,7 @@ def save_to_google_sheets(df: pd.DataFrame):
     sh = gc.open_by_key("11aSQaoDYVL9dWae9m864JbrwMvF1sQ4THFsBv-5ImbM")
     worksheet = sh.get_worksheet(1)  # You can specify the worksheet if needed
 
-    new_data = df.astype(str).values.tolist()  # Convert all data to string to avoid type issues
+    new_data = df.drop(columns=['index'], errors='ignore').astype(str).values.tolist()  # Convert all data to string to avoid type issues
     worksheet.append_rows(new_data)  # Append data to the sheet
 
 def save_file_to_drive(df: pd.DataFrame, filename=None):
