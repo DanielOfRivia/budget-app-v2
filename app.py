@@ -139,11 +139,13 @@ if uploaded_files:
         st.subheader("Transaction groups by category")
         cat_tables = []
         for category, group in st.session_state.main_df.groupby("category"):
-            label = category if category else "Uncategorized"
+            group_name = category if category else "Uncategorized"
             top_transactions = (
                 group.sort_values("amount", ascending=False)
                 [["date", "merchant", "account", "amount", "category", "index"]]
             )
+            total_amount = top_transactions["amount"].sum()
+            label = f"{group_name} — Total: ${total_amount:,.2f}"
             cat_tables.append((label, top_transactions.reset_index(drop=True)))
 
         # Render the category tables in rows of 3 columns
