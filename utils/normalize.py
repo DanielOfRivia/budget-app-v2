@@ -46,7 +46,7 @@ def parse_date(series, length=None):
     if series is None:
         length = 0 if length is None else length
         return pd.Series([pd.NaT] * length, dtype="datetime64[ns]")
-    parsed = pd.to_datetime(series, errors="coerce")
+    parsed = pd.to_datetime(series, errors="coerce", format="mixed")
     if length is not None and len(parsed) != length:
         return pd.Series([parsed.iloc[i] if i < len(parsed) else pd.NaT for i in range(length)], dtype="datetime64[ns]")
     return parsed
@@ -67,7 +67,6 @@ def build_transaction_frame(df, source_file, source_type):
         date_series = raw.get("Date")
     if date_series is None:
         raise ValueError("Date column not found in uploaded CSV file")
-        # print("Date column not found in uploaded CSV file")
     date_parsed = parse_date(date_series, length=length)
 
     merchant_series = raw.get("Merchant")
@@ -79,7 +78,6 @@ def build_transaction_frame(df, source_file, source_type):
         merchant_series = raw.get("Description 2")
     if merchant_series is None:
         raise ValueError("Merchant column not found in uploaded CSV file")
-        # print("Merchant column not found in uploaded CSV file")
 
     amount_series = None
     if "Amount" in raw.columns:
@@ -88,7 +86,6 @@ def build_transaction_frame(df, source_file, source_type):
         amount_series = raw["CAD$"]
     else:
         raise ValueError("Amount column not found in uploaded CSV file")
-        # print("Amount column not found in uploaded CSV file")
 
     
     merchant_clean = safe_text(merchant_series, length=length)
@@ -96,13 +93,7 @@ def build_transaction_frame(df, source_file, source_type):
     if source_type == "RBC":
         amount_parsed = -amount_parsed
 
-    if 'date' in df.columns:
-        max_date = pd.to_datetime(df['date']).max()
-    else:
-        max_date = pd.Timestamp.now()
-
     new_source_file_name = f"{source_type}_{date_parsed.max().strftime('%Y%m%d')}_{date_parsed.min().strftime('%Y%m%d')}.csv"
-
     parsed = pd.DataFrame(
         {
             "date": date_parsed,
