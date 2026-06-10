@@ -22,9 +22,11 @@ def save_to_google_sheets(df: pd.DataFrame):
     gc = gspread.authorize(get_oauth_credentials())
     sh = gc.open_by_key("11aSQaoDYVL9dWae9m864JbrwMvF1sQ4THFsBv-5ImbM")
     worksheet = sh.get_worksheet(1)  # You can specify the worksheet if needed
-
-    new_data = df.drop(columns=['index'], errors='ignore').astype(str).values.tolist()  # Convert all data to string to avoid type issues
-    worksheet.append_rows(new_data)  # Append data to the sheet
+    df_clean = df.drop(columns=['index'], errors='ignore')
+    for col in df_clean.select_dtypes(include=['datetime64', 'datetime']): # Convert datetime columns to string format for Google Sheets
+        df_clean[col] = df_clean[col].dt.strftime('%Y-%m-%d')
+    new_data = df_clean.values.tolist()  # Convert all data to string to avoid type issues
+    worksheet.append_rows(new_data, value_input_option=gspread.utils.ValueInputOption.user_entered)  # Append data to the sheet
 
 def save_file_to_drive(df: pd.DataFrame, filename=None):
     drive_service = build('drive', 'v3', credentials=get_oauth_credentials())
