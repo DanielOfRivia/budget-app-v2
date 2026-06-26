@@ -139,6 +139,7 @@ def login_to_google():
         st.title("📊 Budget Automation App")
         st.write("Please sign in with your Google Account to process statements and update your budget.")
         st.write(REDIRECT_URI)
+        st.write(authorization_url)
         
         # Open login window
         st.link_button("🔑 Sign In With Google", authorization_url, use_container_width=True)
