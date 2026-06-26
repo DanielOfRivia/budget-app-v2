@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from utils.normalize import build_transaction_frame, detect_source
-from utils.google_api import save_to_gdrive_and_sheets
+from utils.google_api import save_to_gdrive_and_sheets, login_to_google
 from google.api_core.exceptions import DeadlineExceeded
 from utils.gemini_category import categorize_merchants
 
@@ -24,10 +24,16 @@ standardized = pd.DataFrame()  # Initialize an empty DataFrame to hold the combi
 
 st.set_page_config(page_title="CSV Preview App", layout="wide")
 st.title("Budget monthly update")
-# st.markdown(
-#     "Upload a CSV file and preview it. The app will identify if it's an AMEX or RBC export and normalize transactions."
-# )
 
+login_to_google()  # Call the login function to handle OAuth flow
+
+# If the code reaches here, a user is successfully logged in!
+st.sidebar.success("Connected to Google Account")
+if st.sidebar.button("Log Out"):
+    del st.session_state.oauth_token
+    st.rerun()
+
+#file uploader for CSV files
 uploaded_files = st.file_uploader(
     "Upload transaction CSV", type=["csv"], key="csv", accept_multiple_files=True, 
     on_change=lambda: st.session_state.update({"show_processed": False, "transaction_groups": True, "main_df": None})

@@ -991,6 +991,7 @@ dependencies = [
     { name = "google-genai" },
     { name = "gspread" },
     { name = "pandas" },
+    { name = "requests-oauthlib" },
     { name = "streamlit" },
 ]
 
@@ -1000,6 +1001,7 @@ requires-dist = [
     { name = "google-genai", specifier = ">=2.4.0" },
     { name = "gspread", specifier = ">=6.2.1" },
     { name = "pandas", specifier = ">=3.0.3" },
+    { name = "requests-oauthlib", specifier = ">=2.0.0" },
     { name = "streamlit", specifier = ">=1.57.0" },
 ]
 

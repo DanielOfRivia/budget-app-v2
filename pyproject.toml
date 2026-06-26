@@ -9,5 +9,6 @@ dependencies = [
     "google-genai>=2.4.0",
     "gspread>=6.2.1",
     "pandas>=3.0.3",
+    "requests-oauthlib>=2.0.0",
     "streamlit>=1.57.0",
 ]

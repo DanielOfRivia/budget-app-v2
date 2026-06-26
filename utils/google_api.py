@@ -5,14 +5,15 @@ import gspread
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from google.oauth2.credentials import Credentials
+from requests_oauthlib import OAuth2Session
 
 
 @st.cache_resource
 def get_oauth_credentials():
-    # Authenticate as a real human user using OAuth secrets
+    token_info = st.session_state.oauth_token
     return Credentials(
-        token=None,  # The library will auto-request an active token using the refresh token
-        refresh_token=st.secrets["google_oauth"]["refresh_token"],
+        token=token_info['access_token'],
+        refresh_token=token_info.get('refresh_token'),
         token_uri="https://oauth2.googleapis.com/token",
         client_id=st.secrets["google_oauth"]["client_id"],
         client_secret=st.secrets["google_oauth"]["client_secret"]
@@ -28,16 +29,44 @@ def save_to_google_sheets(df: pd.DataFrame):
     new_data = df_clean.values.tolist()  # Convert all data to string to avoid type issues
     worksheet.append_rows(new_data, value_input_option=gspread.utils.ValueInputOption.user_entered)  # Append data to the sheet
 
+def get_or_create_folder(drive_service, folder_name, parent_id=None):
+    """Get folder ID by name, or create it if it doesn't exist."""
+    query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    if parent_id:
+        query += f" and '{parent_id}' in parents"
+    
+    results = drive_service.files().list(q=query, spaces='drive', fields='files(id, name)', pageSize=1).execute()
+    files = results.get('files', [])
+    
+    if files:
+        return files[0]['id']
+    else:
+        # Create the folder
+        file_metadata = {
+            'name': folder_name,
+            'mimeType': 'application/vnd.google-apps.folder'
+        }
+        if parent_id:
+            file_metadata['parents'] = [parent_id]
+        folder = drive_service.files().create(body=file_metadata, fields='id').execute()
+        return folder.get('id')
+
+
 def save_file_to_drive(df: pd.DataFrame, filename=None):
     drive_service = build('drive', 'v3', credentials=get_oauth_credentials())
     account_name = df['account'].iloc[0] if 'account' in df.columns else 'unknown_account'
     if filename is None:
         filename = df['source_file'].iloc[0] if 'source_file' in df.columns else "no_name.csv"
 
+    # Get or create "Budget app" root folder
+    root_folder_id = get_or_create_folder(drive_service, "Budget app")
+    
+    # Get or create account folder inside "Budget app"
+    account_folder_id = get_or_create_folder(drive_service, f"{account_name.upper()} statements", root_folder_id)
+
     file_metadata = {
         'name': filename,
-        'parents': ['15zXBMZeWQbjt2O5O4ZN-eVy6WuxfVepl'] if account_name.lower() == 'rbc'
-        else ['1E4TFy0u0-TS15MatlamfCxncFZb4Dx9z']
+        'parents': [account_folder_id]
     }
     csv_bytes = io.BytesIO(df.to_csv(index=False).encode('utf-8'))
     media = MediaIoBaseUpload(csv_bytes, mimetype='text/csv')
@@ -68,3 +97,48 @@ def save_to_gdrive_and_sheets(df: pd.DataFrame):
         st.success("✅ Data saved to Google Sheets and CSV uploaded to Google Drive!")
     except Exception as e:
         st.error(f"Error saving data: {e}")
+
+
+def login_to_google():
+    CLIENT_ID = st.secrets["google_oauth"]["client_id"]
+    CLIENT_SECRET = st.secrets["google_oauth"]["client_secret"]
+    SCOPES = ['openid',
+            'https://www.googleapis.com/auth/drive.file',
+            'https://www.googleapis.com/auth/spreadsheets',
+            'https://www.googleapis.com/auth/userinfo.profile', # To get user's name
+            'https://www.googleapis.com/auth/userinfo.email'] # To get user's email
+    
+    REDIRECT_URI = "https://danylo-budget-app.streamlit.app/"  if st.config.get_option("server.headless") else "http://localhost:8501/"
+
+    google = OAuth2Session(CLIENT_ID, scope=SCOPES, redirect_uri=REDIRECT_URI)
+    
+    # Check if returning from Google with an auth code in the URL parameters
+    query_params = st.query_params
+    if "code" in query_params:
+        try:
+            # Exchange authorization code for access tokens
+            token = google.fetch_token(
+                'https://oauth2.googleapis.com/token',
+                client_secret=CLIENT_SECRET,
+                code=query_params["code"]
+            )
+            st.session_state.oauth_token = token
+            # Clear URL parameters to clean up the workspace
+            st.query_params.clear()
+            st.rerun()
+        except Exception as e:
+            st.error(f"Authentication failed: {e}")
+
+    # If no token exists in session, display the Login UI
+    if "oauth_token" not in st.session_state:
+        authorization_url, state = google.authorization_url(
+            'https://accounts.google.com/o/oauth2/auth',
+            access_type="offline", 
+            prompt="select_account"
+        )
+        st.title("📊 Budget Automation App")
+        st.write("Please sign in with your Google Account to process statements and update your budget.")
+        
+        # Open login window
+        st.link_button("🔑 Sign In With Google", authorization_url, use_container_width=True)
+        st.stop()
