@@ -2,6 +2,8 @@ import io
 import streamlit as st
 import pandas as pd
 import gspread
+import json
+import base64
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from google.oauth2.credentials import Credentials
@@ -123,6 +125,19 @@ def login_to_google():
                 code=query_params["code"]
             )
             st.session_state.oauth_token = token
+            # 2. Extract and decode the id_token
+            if 'id_token' in token:
+                # JWTs are split by dots; the middle part is the data payload
+                payload = token['id_token'].split('.')[1]
+                # Add base64 padding to avoid decoding errors
+                payload += '=' * (-len(payload) % 4)
+                
+                # Decode the JSON
+                user_info = json.loads(base64.b64decode(payload).decode('utf-8'))
+                
+                # Instantly save to session state!
+                st.session_state.user_email = user_info.get("email", "Unknown Email")
+                st.session_state.user_name = user_info.get("name", "")
             # Clear URL parameters to clean up the workspace
             st.query_params.clear()
             st.rerun()
@@ -138,8 +153,6 @@ def login_to_google():
         )
         st.title("📊 Budget Automation App")
         st.write("Please sign in with your Google Account to process statements and update your budget.")
-        st.write(REDIRECT_URI)
-        st.write(authorization_url)
         
         # Open login window
         st.link_button("🔑 Sign In With Google", authorization_url, use_container_width=True)

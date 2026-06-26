@@ -27,10 +27,16 @@ st.title("Budget monthly update")
 
 login_to_google()  # Call the login function to handle OAuth flow
 
-# If the code reaches here, a user is successfully logged in!
-st.sidebar.success("Connected to Google Account")
+st.sidebar.markdown("### Account")
+if st.session_state.get("user_name"):
+    st.sidebar.success(f"✅ Welcome, {st.session_state.user_name}!")
+    st.sidebar.caption(f"Signed in as: **{st.session_state.user_email}**")
+else:
+    st.sidebar.success(f"✅ Signed in as: **{st.session_state.user_email}**")
 if st.sidebar.button("Log Out"):
     del st.session_state.oauth_token
+    del st.session_state.user_email
+    del st.session_state.user_name
     st.rerun()
 
 #file uploader for CSV files
