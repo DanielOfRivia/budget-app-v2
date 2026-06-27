@@ -12,7 +12,6 @@ from google.oauth2.credentials import Credentials
 from requests_oauthlib import OAuth2Session
 
 
-@st.cache_resource
 def get_oauth_credentials():
     token_info = st.session_state.oauth_token
     return Credentials(
@@ -41,7 +40,7 @@ def _coerce_sheet_value(value):
 
 
 def save_to_google_sheets(df: pd.DataFrame):
-    spreadsheet_id = ensure_personal_budget_spreadsheet()
+    spreadsheet_id = ensure_personal_budget_spreadsheet(df)
     sheets_service = _get_sheets_service()
 
     df_clean = df.drop(columns=['index'], errors='ignore')
@@ -88,10 +87,12 @@ def get_or_create_folder(drive_service, folder_name, parent_id=None):
     if parent_id:
         file_metadata['parents'] = [parent_id]
     folder = drive_service.files().create(body=file_metadata, fields='id').execute()
-    return folder.get('id')
+    folder_id = folder.get('id')
+    st.info(f"Created Google Drive folder '{folder_name}'.")
+    return folder_id
 
 
-def ensure_personal_budget_spreadsheet():
+def ensure_personal_budget_spreadsheet(df: pd.DataFrame):
     drive_service = _get_drive_service()
     sheets_service = _get_sheets_service()
 
@@ -116,6 +117,7 @@ def ensure_personal_budget_spreadsheet():
             supportsAllDrives=True,
         ).execute()
         spreadsheet_id = spreadsheet.get('id')
+        st.success("Created Google Sheet 'Personal_Budget'.")
 
     spreadsheet = sheets_service.spreadsheets().get(
         spreadsheetId=spreadsheet_id,
@@ -186,16 +188,55 @@ def ensure_personal_budget_spreadsheet():
             row.append(formula)
         dashboard_rows.append(row)
 
-    accounts_headers = ['Month-Year', 'Amex credit card', 'Rbc credit card', 'Fixed expenses', 'Total expenses']
+    account_names = []
+    if 'account' in df.columns:
+        account_names = [
+            str(account).strip()
+            for account in pd.unique(df['account'].dropna())
+            if str(account).strip()
+        ]
+
+    # Fetch existing account names from CAD_Log tab
+    try:
+        existing_cad_log = sheets_service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range='CAD_Log!D:D'  # Account column is D (index 3)
+        ).execute()
+        existing_values = existing_cad_log.get('values', [])
+        if existing_values and len(existing_values) > 1:  # Skip header
+            existing_accounts = [
+                str(val[0]).strip()  # Extract first element from row
+                for val in existing_values[1:]  # Skip header row
+                if val and len(val) > 0 and str(val[0]).strip()
+            ]
+            # Combine with current account names, preserving order and removing duplicates
+            all_accounts = []
+            seen = set()
+            for account in existing_accounts + account_names:
+                if account not in seen:
+                    all_accounts.append(account)
+                    seen.add(account)
+            account_names = all_accounts
+    except Exception:
+        # If unable to fetch existing data, just use current account names
+        pass
+
+    accounts_headers = ['Month-Year'] + account_names + ['Fixed expenses', 'Total expenses']
+
     accounts_rows = []
     for row_idx, month_start in enumerate(months, start=2):
-        row = [
-            month_start.strftime('%Y-%m'),
-            f'=SUMIFS(CAD_Log!$C:$C, CAD_Log!$F:$F, "AMEX_*", CAD_Log!$A:$A, ">="&$A{row_idx}, CAD_Log!$A:$A, "<"&EOMONTH($A{row_idx},0)+1)',
-            f'=SUMIFS(CAD_Log!$C:$C, CAD_Log!$F:$F, "RBC_*", CAD_Log!$A:$A, ">="&$A{row_idx}, CAD_Log!$A:$A, "<"&EOMONTH($A{row_idx},0)+1)',
-            '0',
-            f'=SUM(B{row_idx}:D{row_idx})',
-        ]
+        row = [month_start.strftime('%Y-%m')]
+
+        for account_index, account_name in enumerate(account_names, start=1):
+            formula = (
+                f'=SUMIFS(CAD_Log!$C:$C, CAD_Log!$F:$F, "{account_name}_*", '
+                f'CAD_Log!$A:$A, ">="&$A{row_idx}, CAD_Log!$A:$A, "<"&EOMONTH($A{row_idx},0)+1)'
+            )
+            row.append(formula)
+
+        fixed_col_letter = chr(ord('A') + len(account_names) + 1)
+        row.append('0')
+        row.append(f'=SUM(B{row_idx}:{fixed_col_letter}{row_idx})')
         accounts_rows.append(row)
 
     values_updates = [
@@ -280,7 +321,7 @@ def ensure_personal_budget_spreadsheet():
                 },
                 {
                     'repeatCell': {
-                        'range': {'sheetId': sheet_id, 'startColumnIndex': 1, 'endColumnIndex': 5},
+                        'range': {'sheetId': sheet_id, 'startColumnIndex': 1, 'endColumnIndex': 1 + len(account_names) + 3},
                         'cell': {'userEnteredFormat': {'numberFormat': {'type': 'CURRENCY', 'pattern': '$#,##0.00'}}},
                         'fields': 'userEnteredFormat.numberFormat',
                     }
@@ -396,3 +437,11 @@ def login_to_google():
         # Open login window
         st.link_button("🔑 Sign In With Google", authorization_url, use_container_width=True)
         st.stop()
+
+
+def logout_google():
+    """Clear all Google OAuth session state."""
+    del st.session_state.oauth_token
+    del st.session_state.user_email
+    del st.session_state.user_name
+    st.rerun()

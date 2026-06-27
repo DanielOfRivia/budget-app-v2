@@ -7,19 +7,9 @@ TRANSACTION_SCHEMA = [
     "account",
     "category",
     "source_file",
+    "old_source_file",
     "notes",
 ]
-
-Transaction = {
-    "date": pd.Timestamp,
-    "merchant": str,
-    "amount": float,   # negative = expense, positive = inflow
-    "account": str,
-    "notes": str,
-    "category": str,
-    "source_file": str,
-}
-
 
 def normalize_amount(amount_series):
     if amount_series is not None:
@@ -58,7 +48,7 @@ def detect_source(df):
     return "AMEX"
 
 
-def build_transaction_frame(df, source_file, source_type, account_override=None):
+def build_transaction_frame(df, source_file, source_type):
     raw = df.copy()
     length = len(raw)
 
@@ -94,16 +84,16 @@ def build_transaction_frame(df, source_file, source_type, account_override=None)
         amount_parsed = -amount_parsed
 
     new_source_file_name = f"{source_type}_{date_parsed.max().strftime('%Y%m%d')}_{date_parsed.min().strftime('%Y%m%d')}.csv"
-    account_value = account_override if account_override is not None else source_type
     parsed = pd.DataFrame(
         {
             "date": date_parsed,
             "merchant": merchant_clean,
             "amount": amount_parsed,
-            "account": pd.Series([account_value] * length, dtype="string"),
+            "account": pd.Series([source_type] * length, dtype="string"),
             "category": pd.Series([""] * length, dtype="string"), #category_series,
             "notes": pd.Series([""] * length, dtype="string"),
             "source_file": pd.Series([new_source_file_name] * length, dtype="string"),
+            "old_source_file": pd.Series([source_file] * length, dtype="string"),
         }
     )
     parsed = parsed[TRANSACTION_SCHEMA]

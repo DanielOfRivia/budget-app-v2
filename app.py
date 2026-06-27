@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from utils.normalize import build_transaction_frame, detect_source
-from utils.google_api import save_to_gdrive_and_sheets, login_to_google
+from utils.google_api import save_to_gdrive_and_sheets, login_to_google, logout_google
 from google.api_core.exceptions import DeadlineExceeded
 from utils.gemini_category import categorize_merchants
 
@@ -12,6 +12,23 @@ def toggle_table_visibility(session_state_key):
 def set_original_table(index):
     current = st.session_state.get("current_original_table")
     st.session_state["current_original_table"] = None if current == index else index
+
+
+def update_main_df_account_for_file(file_name, account_value):
+    main_df = st.session_state.get("main_df")
+    if main_df is None or "old_source_file" not in main_df.columns:
+        return
+
+    matches = main_df["old_source_file"].astype(str) == file_name
+    if matches.any():
+        main_df.loc[matches, "account"] = account_value
+        
+        # Update source_file with new account name and date range from matched rows
+        matched_rows = main_df.loc[matches]
+        date_min = pd.to_datetime(matched_rows["date"]).min()
+        date_max = pd.to_datetime(matched_rows["date"]).max()
+        new_source_file = f"{account_value}_{date_max.strftime('%Y%m%d')}_{date_min.strftime('%Y%m%d')}.csv"
+        main_df.loc[matches, "source_file"] = new_source_file
 
 
 # The callback function to handle updates
@@ -40,10 +57,7 @@ if st.session_state.get("user_name"):
 else:
     st.sidebar.success(f"✅ Signed in as: **{st.session_state.user_email}**")
 if st.sidebar.button("Log Out"):
-    del st.session_state.oauth_token
-    del st.session_state.user_email
-    del st.session_state.user_name
-    st.rerun()
+    logout_google()
 
 #file uploader for CSV files
 uploaded_files = st.file_uploader(
@@ -88,8 +102,9 @@ if uploaded_files:
             if selected_account == "Other":
                 custom_value = st.text_input(
                     "Custom account name",
-                    value=st.session_state.get(custom_account_key, ""),
+                    value=st.session_state.get(custom_account_key, "new_account"),
                     key=custom_account_key,
+                    help="Input new account name and hit enter",
                 ).strip()
                 account_override = custom_value or source_type
             else:
@@ -110,29 +125,35 @@ if uploaded_files:
             )
 
         standardized = pd.concat(
-            [standardized, build_transaction_frame(df, file_name, source_type, account_override=account_override)],
+            [standardized, build_transaction_frame(df, file_name, source_type)],
             ignore_index=True,
         )
 
+        st.session_state[f"selected_account_for_{file_name}"] = account_override
+
     # Store the combined processed DataFrame in session state for later use
-    if "main_df" not in st.session_state or st.session_state.main_df is None:
-        #run gemini categorization on the combined merchant list to get categories for all transactions
-        try:
-            with st.spinner("Assigning categories to transactions…"):
-                category_series = pd.Series(
-                    categorize_merchants(tuple(standardized["merchant"])),
-                    dtype="string"
-                )
-                standardized["category"] = category_series
-            st.session_state.main_df = standardized.copy().reset_index()
 
-        except DeadlineExceeded:
-            st.error("⏱️ AI Generation Timed Out. Please try again.")
-            st.session_state.csv = None  # Reset the file uploader to allow re-uploading
+    try:
+        with st.spinner("Assigning categories to transactions…"):
+            category_series = pd.Series(
+                categorize_merchants(tuple(standardized["merchant"])),
+                dtype="string"
+            )
+            standardized["category"] = category_series
+        st.session_state.main_df = standardized.copy().reset_index()
 
-        except Exception as e:
-            st.error(f"An error occurred during AI categorization: {e}")
-            st.session_state.csv = None  # Reset the file uploader to allow re-uploading
+        for file_name in [name for _, name in raw_dfs]:
+            selected_account = st.session_state.get(f"selected_account_for_{file_name}")
+            if selected_account:
+                update_main_df_account_for_file(file_name, selected_account)
+
+    except DeadlineExceeded:
+        st.error("⏱️ AI Generation Timed Out. Please try again.")
+        st.session_state.csv = None  # Reset the file uploader to allow re-uploading
+
+    except Exception as e:
+        st.error(f"An error occurred during AI categorization: {e}")
+        st.session_state.csv = None  # Reset the file uploader to allow re-uploading
     
     # Show the original table below the file selectors
     current_original = st.session_state.get("current_original_table")
