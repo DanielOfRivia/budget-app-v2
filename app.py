@@ -8,6 +8,12 @@ from utils.gemini_category import categorize_merchants
 def toggle_table_visibility(session_state_key):
     st.session_state[session_state_key] = not st.session_state[session_state_key]
 
+
+def set_original_table(index):
+    current = st.session_state.get("current_original_table")
+    st.session_state["current_original_table"] = None if current == index else index
+
+
 # The callback function to handle updates
 def handle_editor_change(editor_key, filtered_df):
     """Maps edits from a filtered data editor back to the main dataframe."""
@@ -57,10 +63,56 @@ if uploaded_files:
             continue
         raw_dfs.append((df, uploaded_file.name or f"uploaded_file_{i}.csv"))
 
-    # Combine all processed DataFrames
-    for df, file_name in raw_dfs:
+    # Show account selection for each uploaded file and combine all processed DataFrames
+    account_scheme = ["AMEX", "RBC", "Other"]
+    file_cols = st.columns(len(raw_dfs))
+    for i, (df, file_name) in enumerate(raw_dfs):
         source_type = detect_source(df)
-        standardized = pd.concat([standardized, build_transaction_frame(df, file_name, source_type)], ignore_index=True)
+        account_key = f"account_select_{i}"
+        custom_account_key = f"account_custom_{i}"
+
+        if account_key not in st.session_state:
+            st.session_state[account_key] = source_type
+        if custom_account_key not in st.session_state:
+            st.session_state[custom_account_key] = ""
+
+        with file_cols[i]:
+            st.markdown(f"**{file_name}**")
+            selected_account = st.selectbox(
+                "Account",
+                options=account_scheme,
+                index=account_scheme.index(source_type) if source_type in account_scheme else 0,
+                key=account_key,
+            )
+
+            if selected_account == "Other":
+                custom_value = st.text_input(
+                    "Custom account name",
+                    value=st.session_state.get(custom_account_key, ""),
+                    key=custom_account_key,
+                ).strip()
+                account_override = custom_value or source_type
+            else:
+                account_override = selected_account
+
+            current_original = st.session_state.get("current_original_table")
+            show_original = current_original == i
+            original_button_label = (
+                f"Hide original table for {file_name}"
+                if show_original
+                else f"Show original table for {file_name}"
+            )
+            st.button(
+                original_button_label,
+                key=f"show_original_button_{i}",
+                on_click=set_original_table,
+                args=(i,),
+            )
+
+        standardized = pd.concat(
+            [standardized, build_transaction_frame(df, file_name, source_type, account_override=account_override)],
+            ignore_index=True,
+        )
 
     # Store the combined processed DataFrame in session state for later use
     if "main_df" not in st.session_state or st.session_state.main_df is None:
@@ -82,26 +134,15 @@ if uploaded_files:
             st.error(f"An error occurred during AI categorization: {e}")
             st.session_state.csv = None  # Reset the file uploader to allow re-uploading
     
-    # Show the original table
-    for i in range(len(raw_dfs)):
-        if f"show_original_{i}" not in st.session_state:
-            st.session_state[f"show_original_{i}"] = False
-        df = raw_dfs[i][0]
-        file_name = raw_dfs[i][1]
+    # Show the original table below the file selectors
+    current_original = st.session_state.get("current_original_table")
+    if current_original is not None and 0 <= current_original < len(raw_dfs):
+        df = raw_dfs[current_original][0]
+        file_name = raw_dfs[current_original][1]
         source_type = detect_source(df)
         card_label = f"{source_type} card ({file_name})"
-        original_button_label = (f"Hide original table for {card_label}" 
-                                if st.session_state[f"show_original_{i}"] 
-                                else f"Show original table for {card_label}")
-        st.button(
-            original_button_label, 
-            key=f"show_original_button_{i}", 
-            on_click=toggle_table_visibility, 
-            args=(f"show_original_{i}",)  # Passes the session state key to the callback function
-        )
-
-        if st.session_state[f"show_original_{i}"]:
-            st.dataframe(df,)
+        st.subheader(card_label)
+        st.dataframe(df)
 
     # Show the processed table with editable category column
     if f"show_processed" not in st.session_state:

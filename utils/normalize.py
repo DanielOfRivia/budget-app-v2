@@ -58,7 +58,7 @@ def detect_source(df):
     return "AMEX"
 
 
-def build_transaction_frame(df, source_file, source_type):
+def build_transaction_frame(df, source_file, source_type, account_override=None):
     raw = df.copy()
     length = len(raw)
 
@@ -94,12 +94,13 @@ def build_transaction_frame(df, source_file, source_type):
         amount_parsed = -amount_parsed
 
     new_source_file_name = f"{source_type}_{date_parsed.max().strftime('%Y%m%d')}_{date_parsed.min().strftime('%Y%m%d')}.csv"
+    account_value = account_override if account_override is not None else source_type
     parsed = pd.DataFrame(
         {
             "date": date_parsed,
             "merchant": merchant_clean,
             "amount": amount_parsed,
-            "account": pd.Series([source_type] * length, dtype="string"),
+            "account": pd.Series([account_value] * length, dtype="string"),
             "category": pd.Series([""] * length, dtype="string"), #category_series,
             "notes": pd.Series([""] * length, dtype="string"),
             "source_file": pd.Series([new_source_file_name] * length, dtype="string"),

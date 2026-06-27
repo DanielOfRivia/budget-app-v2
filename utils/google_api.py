@@ -1,9 +1,11 @@
 import io
+import json
+import base64
+from datetime import date, datetime
+
 import streamlit as st
 import pandas as pd
 import gspread
-import json
-import base64
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from google.oauth2.credentials import Credentials
@@ -21,37 +23,277 @@ def get_oauth_credentials():
         client_secret=st.secrets["google_oauth"]["client_secret"]
     )
 
+
+def _get_drive_service():
+    return build('drive', 'v3', credentials=get_oauth_credentials())
+
+
+def _get_sheets_service():
+    return build('sheets', 'v4', credentials=get_oauth_credentials())
+
+
+def _coerce_sheet_value(value):
+    if pd.isna(value):
+        return ""
+    if isinstance(value, (datetime, date)):
+        return value.strftime('%Y-%m-%d')
+    return value
+
+
 def save_to_google_sheets(df: pd.DataFrame):
-    gc = gspread.authorize(get_oauth_credentials())
-    sh = gc.open_by_key("11aSQaoDYVL9dWae9m864JbrwMvF1sQ4THFsBv-5ImbM")
-    worksheet = sh.get_worksheet(1)  # You can specify the worksheet if needed
+    spreadsheet_id = ensure_personal_budget_spreadsheet()
+    sheets_service = _get_sheets_service()
+
     df_clean = df.drop(columns=['index'], errors='ignore')
-    for col in df_clean.select_dtypes(include=['datetime64', 'datetime']): # Convert datetime columns to string format for Google Sheets
+    for col in df_clean.select_dtypes(include=['datetime64', 'datetime']):
         df_clean[col] = df_clean[col].dt.strftime('%Y-%m-%d')
-    new_data = df_clean.values.tolist()  # Convert all data to string to avoid type issues
-    worksheet.append_rows(new_data, value_input_option=gspread.utils.ValueInputOption.user_entered)  # Append data to the sheet
+
+    rows = []
+    for row in df_clean.to_dict('records'):
+        rows.append([
+            _coerce_sheet_value(row.get('date') or row.get('Date') or ''),
+            _coerce_sheet_value(row.get('merchant') or row.get('Transaction') or row.get('transaction') or ''),
+            _coerce_sheet_value(row.get('amount') or row.get('Amount (CAD)') or ''),
+            _coerce_sheet_value(row.get('account') or row.get('Account') or ''),
+            _coerce_sheet_value(row.get('category') or row.get('Category') or ''),
+            _coerce_sheet_value(row.get('source_file') or row.get('File_name') or row.get('file_name') or ''),
+            _coerce_sheet_value(row.get('notes') or row.get('Notes') or ''),
+        ])
+
+    if rows:
+        sheets_service.spreadsheets().values().append(
+            spreadsheetId=spreadsheet_id,
+            range='CAD_Log!A:G',
+            valueInputOption='USER_ENTERED',
+            body={'values': rows}
+        ).execute()
+
 
 def get_or_create_folder(drive_service, folder_name, parent_id=None):
     """Get folder ID by name, or create it if it doesn't exist."""
     query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
     if parent_id:
         query += f" and '{parent_id}' in parents"
-    
+
     results = drive_service.files().list(q=query, spaces='drive', fields='files(id, name)', pageSize=1).execute()
     files = results.get('files', [])
-    
+
     if files:
         return files[0]['id']
+
+    file_metadata = {
+        'name': folder_name,
+        'mimeType': 'application/vnd.google-apps.folder'
+    }
+    if parent_id:
+        file_metadata['parents'] = [parent_id]
+    folder = drive_service.files().create(body=file_metadata, fields='id').execute()
+    return folder.get('id')
+
+
+def ensure_personal_budget_spreadsheet():
+    drive_service = _get_drive_service()
+    sheets_service = _get_sheets_service()
+
+    root_folder_id = get_or_create_folder(drive_service, "Budget app")
+    query = (
+        f"name='Personal_Budget' and mimeType='application/vnd.google-apps.spreadsheet' "
+        f"and trashed=false and '{root_folder_id}' in parents"
+    )
+    results = drive_service.files().list(q=query, spaces='drive', fields='files(id, name)', pageSize=1).execute()
+    files = results.get('files', [])
+
+    if files:
+        spreadsheet_id = files[0]['id']
     else:
-        # Create the folder
-        file_metadata = {
-            'name': folder_name,
-            'mimeType': 'application/vnd.google-apps.folder'
-        }
-        if parent_id:
-            file_metadata['parents'] = [parent_id]
-        folder = drive_service.files().create(body=file_metadata, fields='id').execute()
-        return folder.get('id')
+        spreadsheet = drive_service.files().create(
+            body={
+                'name': 'Personal_Budget',
+                'mimeType': 'application/vnd.google-apps.spreadsheet',
+                'parents': [root_folder_id],
+            },
+            fields='id',
+            supportsAllDrives=True,
+        ).execute()
+        spreadsheet_id = spreadsheet.get('id')
+
+    spreadsheet = sheets_service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
+        fields='sheets.properties'
+    ).execute()
+    sheets = spreadsheet.get('sheets', [])
+    existing_sheet_map = {sheet['properties']['title']: sheet['properties']['sheetId'] for sheet in sheets}
+
+    requests = []
+    required_tabs = ['Dashboard', 'CAD_Log', 'Accounts']
+
+    if 'Dashboard' not in existing_sheet_map:
+        if 'Sheet1' in existing_sheet_map:
+            requests.append({
+                'updateSheetProperties': {
+                    'properties': {'sheetId': existing_sheet_map['Sheet1'], 'title': 'Dashboard'},
+                    'fields': 'title',
+                }
+            })
+            existing_sheet_map['Dashboard'] = existing_sheet_map.pop('Sheet1')
+        else:
+            requests.append({'addSheet': {'properties': {'title': 'Dashboard'}}})
+
+    for tab_name in ['CAD_Log', 'Accounts']:
+        if tab_name not in existing_sheet_map:
+            requests.append({'addSheet': {'properties': {'title': tab_name}}})
+
+    for tab_name, sheet_id in list(existing_sheet_map.items()):
+        if tab_name not in required_tabs:
+            requests.append({'deleteSheet': {'sheetId': sheet_id}})
+
+    if requests:
+        sheets_service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={'requests': requests}
+        ).execute()
+
+    spreadsheet = sheets_service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
+        fields='sheets.properties'
+    ).execute()
+    sheet_map = {sheet['properties']['title']: sheet['properties']['sheetId'] for sheet in spreadsheet.get('sheets', [])}
+
+    today = date.today().replace(day=1)
+    months = []
+    start_month = today.replace(year=today.year - 1)
+    end_month = today.replace(year=today.year + 1)
+    current = start_month
+    while current <= end_month:
+        months.append(current)
+        if current.month == 12:
+            current = current.replace(year=current.year + 1, month=1)
+        else:
+            current = current.replace(month=current.month + 1)
+
+    dashboard_headers = [
+        'Month-Year', 'Fixed expenses', 'Groceries', 'Transport', 'Eating out',
+        'Health & Wellness', 'Fun stuff', 'Gifts', 'Travel', 'Clothes', 'Charity', 'Other'
+    ]
+    dashboard_rows = []
+    for row_idx, month_start in enumerate(months, start=2):
+        row = [month_start.strftime('%Y-%m'), '0']
+        for col_idx, col_letter in enumerate(['C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'], start=2):
+            formula = (
+                f'=SUMIFS(CAD_Log!$C:$C, CAD_Log!$E:$E, {col_letter}$1, '
+                f'CAD_Log!$A:$A, ">="&$A{row_idx}, CAD_Log!$A:$A, "<"&EOMONTH($A{row_idx},0)+1)'
+            )
+            row.append(formula)
+        dashboard_rows.append(row)
+
+    accounts_headers = ['Month-Year', 'Amex credit card', 'Rbc credit card', 'Fixed expenses', 'Total expenses']
+    accounts_rows = []
+    for row_idx, month_start in enumerate(months, start=2):
+        row = [
+            month_start.strftime('%Y-%m'),
+            f'=SUMIFS(CAD_Log!$C:$C, CAD_Log!$F:$F, "AMEX_*", CAD_Log!$A:$A, ">="&$A{row_idx}, CAD_Log!$A:$A, "<"&EOMONTH($A{row_idx},0)+1)',
+            f'=SUMIFS(CAD_Log!$C:$C, CAD_Log!$F:$F, "RBC_*", CAD_Log!$A:$A, ">="&$A{row_idx}, CAD_Log!$A:$A, "<"&EOMONTH($A{row_idx},0)+1)',
+            '0',
+            f'=SUM(B{row_idx}:D{row_idx})',
+        ]
+        accounts_rows.append(row)
+
+    values_updates = [
+        ('Dashboard!A1', [dashboard_headers] + dashboard_rows),
+        ('CAD_Log!A1', [['Date', 'Transaction', 'Amount (CAD)', 'Account', 'Category', 'File_name', 'Notes']]),
+        ('Accounts!A1', [accounts_headers] + accounts_rows),
+    ]
+
+    for range_name, values in values_updates:
+        sheets_service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=range_name,
+            valueInputOption='USER_ENTERED',
+            body={'values': values}
+        ).execute()
+
+    format_requests = []
+    for tab_name, sheet_id in sheet_map.items():
+        if tab_name == 'Dashboard':
+            format_requests.extend([
+                {
+                    'repeatCell': {
+                        'range': {'sheetId': sheet_id, 'startRowIndex': 0, 'endRowIndex': 1},
+                        'cell': {'userEnteredFormat': {'textFormat': {'bold': True}}},
+                        'fields': 'userEnteredFormat.textFormat.bold',
+                    }
+                },
+                {
+                    'repeatCell': {
+                        'range': {'sheetId': sheet_id, 'startColumnIndex': 0, 'endColumnIndex': 1},
+                        'cell': {'userEnteredFormat': {'numberFormat': {'type': 'DATE', 'pattern': 'yyyy-mm'}}},
+                        'fields': 'userEnteredFormat.numberFormat',
+                    }
+                },
+                {
+                    'repeatCell': {
+                        'range': {'sheetId': sheet_id, 'startColumnIndex': 1, 'endColumnIndex': 12},
+                        'cell': {'userEnteredFormat': {'numberFormat': {'type': 'CURRENCY', 'pattern': '$#,##0.00'}}},
+                        'fields': 'userEnteredFormat.numberFormat',
+                    }
+                },
+            ])
+        elif tab_name == 'CAD_Log':
+            format_requests.extend([
+                {
+                    'repeatCell': {
+                        'range': {'sheetId': sheet_id, 'startRowIndex': 0, 'endRowIndex': 1},
+                        'cell': {'userEnteredFormat': {'textFormat': {'bold': True}}},
+                        'fields': 'userEnteredFormat.textFormat.bold',
+                    }
+                },
+                {
+                    'repeatCell': {
+                        'range': {'sheetId': sheet_id, 'startColumnIndex': 0, 'endColumnIndex': 1},
+                        'cell': {'userEnteredFormat': {'numberFormat': {'type': 'DATE', 'pattern': 'yyyy-mm-dd'}}},
+                        'fields': 'userEnteredFormat.numberFormat',
+                    }
+                },
+                {
+                    'repeatCell': {
+                        'range': {'sheetId': sheet_id, 'startColumnIndex': 2, 'endColumnIndex': 3},
+                        'cell': {'userEnteredFormat': {'numberFormat': {'type': 'CURRENCY', 'pattern': '$#,##0.00'}}},
+                        'fields': 'userEnteredFormat.numberFormat',
+                    }
+                },
+            ])
+        elif tab_name == 'Accounts':
+            format_requests.extend([
+                {
+                    'repeatCell': {
+                        'range': {'sheetId': sheet_id, 'startRowIndex': 0, 'endRowIndex': 1},
+                        'cell': {'userEnteredFormat': {'textFormat': {'bold': True}}},
+                        'fields': 'userEnteredFormat.textFormat.bold',
+                    }
+                },
+                {
+                    'repeatCell': {
+                        'range': {'sheetId': sheet_id, 'startColumnIndex': 0, 'endColumnIndex': 1},
+                        'cell': {'userEnteredFormat': {'numberFormat': {'type': 'DATE', 'pattern': 'yyyy-mm'}}},
+                        'fields': 'userEnteredFormat.numberFormat',
+                    }
+                },
+                {
+                    'repeatCell': {
+                        'range': {'sheetId': sheet_id, 'startColumnIndex': 1, 'endColumnIndex': 5},
+                        'cell': {'userEnteredFormat': {'numberFormat': {'type': 'CURRENCY', 'pattern': '$#,##0.00'}}},
+                        'fields': 'userEnteredFormat.numberFormat',
+                    }
+                },
+            ])
+
+    if format_requests:
+        sheets_service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={'requests': format_requests}
+        ).execute()
+
+    return spreadsheet_id
 
 
 def save_file_to_drive(df: pd.DataFrame, filename=None):
@@ -60,10 +302,7 @@ def save_file_to_drive(df: pd.DataFrame, filename=None):
     if filename is None:
         filename = df['source_file'].iloc[0] if 'source_file' in df.columns else "no_name.csv"
 
-    # Get or create "Budget app" root folder
     root_folder_id = get_or_create_folder(drive_service, "Budget app")
-    
-    # Get or create account folder inside "Budget app"
     account_folder_id = get_or_create_folder(drive_service, f"{account_name.upper()} statements", root_folder_id)
 
     file_metadata = {
@@ -73,9 +312,9 @@ def save_file_to_drive(df: pd.DataFrame, filename=None):
     csv_bytes = io.BytesIO(df.to_csv(index=False).encode('utf-8'))
     media = MediaIoBaseUpload(csv_bytes, mimetype='text/csv')
     drive_service.files().create(
-        body=file_metadata, 
-        media_body=media, 
-        fields='id', 
+        body=file_metadata,
+        media_body=media,
+        fields='id',
         supportsAllDrives=True).execute()
 
 
