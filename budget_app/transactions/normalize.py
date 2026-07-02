@@ -15,8 +15,8 @@ def normalize_amount(amount_series):
     if amount_series is not None:
         cleaned = (
             amount_series.astype(str)
-            .str.replace("[,\$]", "", regex=True)
-            .str.replace("\((.*)\)", r"-\1", regex=True)
+            .str.replace(r"[,$]", "", regex=True)
+            .str.replace(r"\((.*)\)", r"-\1", regex=True)
         )
         return pd.to_numeric(cleaned, errors="coerce")
     return pd.Series(dtype="float64")

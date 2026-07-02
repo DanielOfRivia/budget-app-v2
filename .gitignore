@@ -14,3 +14,6 @@ wheels/
 
 # logs
 logs/
+
+# OS-specific files
+.DS_Store

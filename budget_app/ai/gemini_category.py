@@ -87,10 +87,9 @@ def _build_batch_prompt(merchant_names):
 def categorize_merchants(merchants: tuple):
 
     CURRENT_SCRIPT = Path(__file__).resolve()
-    PROJECT_ROOT = CURRENT_SCRIPT.parent.parent
+    PROJECT_ROOT = CURRENT_SCRIPT.parents[2]
     LOGS_DIR = PROJECT_ROOT / "logs"
     LOGS_DIR.mkdir(exist_ok=True)
-    prompt_file_path = LOGS_DIR / "prompt.txt"
 
     cleaned = [str(m or "").strip() for m in merchants]
     if not cleaned:
