@@ -73,7 +73,8 @@ def ensure_personal_budget_spreadsheet(df: pd.DataFrame):
         fields='sheets.properties'
     ).execute()
     sheet_map = {sheet['properties']['title']: sheet['properties']['sheetId'] for sheet in spreadsheet.get('sheets', [])}
-
+    locale = spreadsheet.get('properties', {}).get('locale', 'en_US')
+    formula_separator = ',' if locale.startswith('en_') else ';'
     today = date.today().replace(day=1)
     months = []
     start_month = today.replace(year=today.year - 1)
@@ -95,8 +96,8 @@ def ensure_personal_budget_spreadsheet(df: pd.DataFrame):
         row = [month_start.strftime('%Y-%m'), '0']
         for col_idx, col_letter in enumerate(['C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'], start=2):
             formula = (
-                f'=SUMIFS(CAD_Log!$C:$C, CAD_Log!$E:$E, {col_letter}$1, '
-                f'CAD_Log!$A:$A, ">="&$A{row_idx}, CAD_Log!$A:$A, "<"&EOMONTH($A{row_idx},0)+1)'
+                f'=SUMIFS(CAD_Log!$C:$C{formula_separator} CAD_Log!$E:$E{formula_separator} {col_letter}$1, '
+                f'CAD_Log!$A:$A{formula_separator} ">="&$A{row_idx}{formula_separator} CAD_Log!$A:$A{formula_separator} "<"&EOMONTH($A{row_idx}{formula_separator}0)+1)'
             )
             row.append(formula)
         dashboard_rows.append(row)
@@ -142,8 +143,8 @@ def ensure_personal_budget_spreadsheet(df: pd.DataFrame):
 
         for account_index, account_name in enumerate(account_names, start=1):
             formula = (
-                f'=SUMIFS(CAD_Log!$C:$C, CAD_Log!$F:$F, "{account_name}_*", '
-                f'CAD_Log!$A:$A, ">="&$A{row_idx}, CAD_Log!$A:$A, "<"&EOMONTH($A{row_idx},0)+1)'
+                f'=SUMIFS(CAD_Log!$C:$C{formula_separator} CAD_Log!$F:$F{formula_separator} "{account_name}_*", '
+                f'CAD_Log!$A:$A{formula_separator} ">="&$A{row_idx}{formula_separator} CAD_Log!$A:$A{formula_separator} "<"&EOMONTH($A{row_idx}{formula_separator}0)+1)'
             )
             row.append(formula)
 

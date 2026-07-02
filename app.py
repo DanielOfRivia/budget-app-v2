@@ -96,14 +96,12 @@ if uploaded_files:
             selected_account = st.selectbox(
                 "Account",
                 options=account_scheme,
-                index=account_scheme.index(source_type) if source_type in account_scheme else 0,
                 key=account_key,
             )
 
             if selected_account == "Other":
                 custom_value = st.text_input(
                     "Custom account name",
-                    value=st.session_state.get(custom_account_key, "new_account"),
                     key=custom_account_key,
                     help="Input new account name and hit enter",
                 ).strip()
