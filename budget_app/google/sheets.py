@@ -38,3 +38,5 @@ def save_to_google_sheets(df: pd.DataFrame):
             valueInputOption='USER_ENTERED',
             body={'values': rows}
         ).execute()
+
+    return spreadsheet_id

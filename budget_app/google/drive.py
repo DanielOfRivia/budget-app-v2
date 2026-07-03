@@ -50,15 +50,19 @@ def save_file_to_drive(df: pd.DataFrame, filename=None):
         fields='id',
         supportsAllDrives=True).execute()
 
+    return root_folder_id
+
 
 def split_and_save_to_drive(df: pd.DataFrame):
     if 'source_file' in df.columns:
         source_files = df['source_file'].astype(str).fillna('unknown_source').unique()
+        drive_folder_id = None
         for source_name in source_files:
             group_df = df[df['source_file'].astype(str) == source_name]
             filename = source_name if source_name else 'no_name'
             if not filename.lower().endswith('.csv'):
                 filename = f"{filename}.csv"
-            save_file_to_drive(group_df, filename=filename)
-    else:
-        save_file_to_drive(df)
+            drive_folder_id = save_file_to_drive(group_df, filename=filename)
+        return drive_folder_id
+
+    return save_file_to_drive(df)
