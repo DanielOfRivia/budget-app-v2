@@ -16,8 +16,9 @@ def ensure_personal_budget_spreadsheet(df: pd.DataFrame):
     )
     results = drive_service.files().list(q=query, spaces='drive', fields='files(id, name)', pageSize=1).execute()
     files = results.get('files', [])
+    spreadsheet_exists = len(files) > 0
 
-    if files:
+    if spreadsheet_exists:
         spreadsheet_id = files[0]['id']
     else:
         spreadsheet = drive_service.files().create(
@@ -40,7 +41,6 @@ def ensure_personal_budget_spreadsheet(df: pd.DataFrame):
     existing_sheet_map = {sheet['properties']['title']: sheet['properties']['sheetId'] for sheet in sheets}
 
     requests = []
-    required_tabs = ['Dashboard', 'CAD_Log', 'Accounts']
 
     if 'Dashboard' not in existing_sheet_map:
         if 'Sheet1' in existing_sheet_map:
@@ -57,10 +57,6 @@ def ensure_personal_budget_spreadsheet(df: pd.DataFrame):
     for tab_name in ['CAD_Log', 'Accounts']:
         if tab_name not in existing_sheet_map:
             requests.append({'addSheet': {'properties': {'title': tab_name}}})
-
-    for tab_name, sheet_id in list(existing_sheet_map.items()):
-        if tab_name not in required_tabs:
-            requests.append({'deleteSheet': {'sheetId': sheet_id}})
 
     if requests:
         sheets_service.spreadsheets().batchUpdate(
@@ -153,11 +149,23 @@ def ensure_personal_budget_spreadsheet(df: pd.DataFrame):
         row.append(f'=SUM(B{row_idx}:{fixed_col_letter}{row_idx})')
         accounts_rows.append(row)
 
-    values_updates = [
-        ('Dashboard!A1', [dashboard_headers] + dashboard_rows),
-        ('CAD_Log!A1', [['Date', 'Transaction', 'Amount (CAD)', 'Account', 'Category', 'File_name', 'Notes']]),
-        ('Accounts!A1', [accounts_headers] + accounts_rows),
-    ]
+    values_updates = []
+
+    # Only initialize Dashboard when the spreadsheet is first created.
+    # Do not touch Dashboard after that, because you may customize it manually.
+    if not spreadsheet_exists:
+        values_updates.append(('Dashboard!A1', [dashboard_headers] + dashboard_rows))
+
+    # Only write CAD_Log headers when the spreadsheet is first created.
+    # Actual transactions are appended later in save_to_google_sheets().
+    if not spreadsheet_exists:
+        values_updates.append((
+            'CAD_Log!A1',
+            [['Date', 'Transaction', 'Amount (CAD)', 'Account', 'Category', 'File_name', 'Notes']]
+        ))
+
+    # Always refresh Accounts, because this tab depends on account names.
+    values_updates.append(('Accounts!A1', [accounts_headers] + accounts_rows))
 
     for range_name, values in values_updates:
         sheets_service.spreadsheets().values().update(
