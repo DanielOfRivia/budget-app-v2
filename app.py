@@ -44,8 +44,6 @@ def handle_editor_change(editor_key, filtered_df):
         col_name, new_value = next(iter(changes.items()))  # Assuming only one cell is edited at a time
         st.session_state.main_df.at[actual_global_idx, col_name] = (new_value)
 
-standardized = pd.DataFrame()  # Initialize an empty DataFrame to hold the combined processed data
-
 st.set_page_config(page_title="CSV Preview App", layout="wide")
 st.title("Budget monthly update")
 
@@ -128,9 +126,8 @@ if uploaded_files:
                 args=(i,),
             )
 
-        # st.session_state[f"selected_account_for_{file_name}"] = account_override
 
-    # Store the combined processed DataFrame in session state for later use
+    # Only build/categorize the dataframe once per upload.
     if st.session_state.get("main_df") is None:
         standardized = pd.DataFrame()
 
@@ -160,7 +157,7 @@ if uploaded_files:
             st.session_state.csv = None  # Reset the file uploader to allow re-uploading
     
     
-    # Account changes can still update the existing dataframe.
+    # Account changes update the existing dataframe
     for file_name, selected_account in account_overrides.items():
         if selected_account:
             update_main_df_account_for_file(file_name, selected_account)
