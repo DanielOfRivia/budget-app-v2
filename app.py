@@ -81,6 +81,9 @@ if uploaded_files:
     # Show account selection for each uploaded file and combine all processed DataFrames
     account_scheme = ["AMEX", "RBC", "Other"]
     file_cols = st.columns(len(raw_dfs))
+
+    account_overrides = {}
+
     for i, (df, file_name) in enumerate(raw_dfs):
         source_type = detect_source(df)
         account_key = f"account_select_{i}"
@@ -109,6 +112,8 @@ if uploaded_files:
             else:
                 account_override = selected_account
 
+            account_overrides[file_name] = account_override
+
             current_original = st.session_state.get("current_original_table")
             show_original = current_original == i
             original_button_label = (
@@ -123,36 +128,42 @@ if uploaded_files:
                 args=(i,),
             )
 
-        standardized = pd.concat(
-            [standardized, build_transaction_frame(df, file_name, source_type)],
-            ignore_index=True,
-        )
-
-        st.session_state[f"selected_account_for_{file_name}"] = account_override
+        # st.session_state[f"selected_account_for_{file_name}"] = account_override
 
     # Store the combined processed DataFrame in session state for later use
+    if st.session_state.get("main_df") is None:
+        standardized = pd.DataFrame()
 
-    try:
-        with st.spinner("Assigning categories to transactions…"):
-            category_series = pd.Series(
-                categorize_merchants(tuple(standardized["merchant"])),
-                dtype="string"
+        for df, file_name in raw_dfs:
+            source_type = detect_source(df)
+
+            standardized = pd.concat(
+                [standardized, build_transaction_frame(df, file_name, source_type)],
+                ignore_index=True,
             )
-            standardized["category"] = category_series
-        st.session_state.main_df = standardized.copy().reset_index()
 
-        for file_name in [name for _, name in raw_dfs]:
-            selected_account = st.session_state.get(f"selected_account_for_{file_name}")
-            if selected_account:
-                update_main_df_account_for_file(file_name, selected_account)
+        try:
+            with st.spinner("Assigning categories to transactions…"):
+                category_series = pd.Series(
+                    categorize_merchants(tuple(standardized["merchant"])),
+                    dtype="string"
+                )
+                standardized["category"] = category_series
+            st.session_state.main_df = standardized.copy().reset_index()
 
-    except DeadlineExceeded:
-        st.error("⏱️ AI Generation Timed Out. Please try again.")
-        st.session_state.csv = None  # Reset the file uploader to allow re-uploading
+        except DeadlineExceeded:
+            st.error("⏱️ AI Generation Timed Out. Please try again.")
+            st.session_state.csv = None  # Reset the file uploader to allow re-uploading
 
-    except Exception as e:
-        st.error(f"An error occurred during AI categorization: {e}")
-        st.session_state.csv = None  # Reset the file uploader to allow re-uploading
+        except Exception as e:
+            st.error(f"An error occurred during AI categorization: {e}")
+            st.session_state.csv = None  # Reset the file uploader to allow re-uploading
+    
+    
+    # Account changes can still update the existing dataframe.
+    for file_name, selected_account in account_overrides.items():
+        if selected_account:
+            update_main_df_account_for_file(file_name, selected_account)
     
     # Show the original table below the file selectors
     current_original = st.session_state.get("current_original_table")
