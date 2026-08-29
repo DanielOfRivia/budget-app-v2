@@ -1,5 +1,3 @@
-import functools
-import os
 from typing import Any
 from google import genai
 import streamlit as st
@@ -83,9 +81,20 @@ def _build_batch_prompt(merchant_names):
     return "\n".join(prompt_lines)
 
 
-@functools.lru_cache(maxsize=256)
-def categorize_merchants(merchants: tuple):
+def _lookup_known_categories(merchants: list) -> dict:
+    """Categories already assigned to these merchants in past transactions, so we
+    don't re-ask Gemini for merchants we've already categorized before (this
+    matters once transactions arrive incrementally via Plaid sync rather than
+    one big CSV batch at a time)."""
+    try:
+        from budget_app.db.transactions import get_known_categories
+        return get_known_categories(merchants)
+    except Exception as exc:
+        print("Known-category lookup failed:", exc)
+        return {}
 
+
+def categorize_merchants(merchants: tuple):
     CURRENT_SCRIPT = Path(__file__).resolve()
     PROJECT_ROOT = CURRENT_SCRIPT.parents[2]
     LOGS_DIR = PROJECT_ROOT / "logs"
@@ -96,31 +105,34 @@ def categorize_merchants(merchants: tuple):
         return []
 
     unique_order = []
-    seen = {}
+    seen = set()
     for merchant in cleaned:
-        if merchant not in seen:
-            seen[merchant] = None
+        if merchant and merchant not in seen:
+            seen.add(merchant)
             unique_order.append(merchant)
     if not unique_order:
         return [""] * len(cleaned)
-    
-    prompt = _build_batch_prompt(unique_order)
-    with open(LOGS_DIR / "prompt.txt", "w", encoding="utf-8") as file:
-        file.write(prompt)
-        
-    raw_output = _run_gemini_request(prompt, LOGS_DIR)
-    with open(LOGS_DIR / "response.txt", "w", encoding="utf-8") as file:
-        file.write(raw_output)
-    categories = [line.strip() for line in str(raw_output).splitlines() if line.strip()]
 
-    result_map = {}
-    for merchant, category in zip(unique_order, categories):
-        result_map[merchant] = category
-    for merchant in unique_order[len(categories):]:
-        result_map[merchant] = ""
+    result_map = _lookup_known_categories(unique_order)
+    unknown = [m for m in unique_order if m not in result_map]
+
+    if unknown:
+        prompt = _build_batch_prompt(unknown)
+        with open(LOGS_DIR / "prompt.txt", "w", encoding="utf-8") as file:
+            file.write(prompt)
+
+        raw_output = _run_gemini_request(prompt, LOGS_DIR)
+        with open(LOGS_DIR / "response.txt", "w", encoding="utf-8") as file:
+            file.write(raw_output)
+        categories = [line.strip() for line in str(raw_output).splitlines() if line.strip()]
+
+        for merchant, category in zip(unknown, categories):
+            result_map[merchant] = category
+        for merchant in unknown[len(categories):]:
+            result_map[merchant] = ""
 
     return [result_map.get(m, "") if m else "" for m in cleaned]
 
 
 def categorize_merchant(merchant: str) -> str:
-    return categorize_merchants([merchant])[0] if merchant is not None else ""
+    return categorize_merchants((merchant,))[0] if merchant is not None else ""

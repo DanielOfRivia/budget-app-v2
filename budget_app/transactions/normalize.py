@@ -9,6 +9,7 @@ TRANSACTION_SCHEMA = [
     "source_file",
     "old_source_file",
     "notes",
+    "source",
 ]
 
 def normalize_amount(amount_series):
@@ -94,6 +95,7 @@ def build_transaction_frame(df, source_file, source_type):
             "notes": pd.Series([""] * length, dtype="string"),
             "source_file": pd.Series([new_source_file_name] * length, dtype="string"),
             "old_source_file": pd.Series([source_file] * length, dtype="string"),
+            "source": pd.Series(["csv"] * length, dtype="string"),
         }
     )
     parsed = parsed[TRANSACTION_SCHEMA]
