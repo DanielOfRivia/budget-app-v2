@@ -8,6 +8,7 @@ from plaid.model.link_token_create_hosted_link import LinkTokenCreateHostedLink
 from plaid.model.link_token_create_request import LinkTokenCreateRequest
 from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
 from plaid.model.link_token_get_request import LinkTokenGetRequest
+from plaid.model.link_token_transactions import LinkTokenTransactions
 from plaid.model.products import Products
 from plaid.model.transactions_sync_request import TransactionsSyncRequest
 
@@ -19,7 +20,10 @@ from budget_app.db.plaid import (
     update_cursor,
     upsert_plaid_account,
 )
-from budget_app.db.transactions import insert_transactions_by_account_id
+from budget_app.db.transactions import (
+    delete_transactions_by_external_ids,
+    insert_transactions_by_account_id,
+)
 from budget_app.plaid.client import get_plaid_client
 
 
@@ -45,6 +49,11 @@ def create_hosted_link(owner_email: str) -> tuple[str, str]:
         user=LinkTokenCreateRequestUser(client_user_id=client_user_id),
         products=[Products("transactions")],
         hosted_link=LinkTokenCreateHostedLink(),
+        # Ask for the full window of back-history Plaid supports, so a newly
+        # linked bank backfills prior transactions rather than only tracking
+        # activity from the link date forward. Institutions vary in how much
+        # they actually return.
+        transactions=LinkTokenTransactions(days_requested=730),
     )
     response = client.link_token_create(request)
     return response.link_token, response.hosted_link_url
@@ -149,6 +158,7 @@ def sync_transactions(owner_email: str, item_id: str) -> dict:
     institution_name = item_row["institution_name"].iloc[0]
 
     all_transactions = []
+    removed_external_ids = []
     accounts_by_id = {}
     has_more = True
     while has_more:
@@ -171,13 +181,16 @@ def sync_transactions(owner_email: str, item_id: str) -> dict:
         # modifications are typically pending->posted amount/date tweaks, not
         # something this app needs to reconcile precisely yet.
         all_transactions.extend(response.modified)
+        removed_external_ids.extend(t.transaction_id for t in response.removed)
         cursor = response.next_cursor
         has_more = response.has_more
 
     update_cursor(item_id, cursor)
 
+    removed_count = delete_transactions_by_external_ids(owner_email, removed_external_ids)
+
     if not all_transactions:
-        return {"inserted": 0, "skipped": 0, "accounts_linked": 0}
+        return {"inserted": 0, "skipped": 0, "filtered": 0, "removed": removed_count, "accounts_linked": 0}
 
     account_id_map = {
         plaid_account_id: upsert_plaid_account(
@@ -192,7 +205,13 @@ def sync_transactions(owner_email: str, item_id: str) -> dict:
     filtered_out = len(all_transactions) - len(spend_transactions)
 
     if not spend_transactions:
-        return {"inserted": 0, "skipped": 0, "filtered": filtered_out, "accounts_linked": len(account_id_map)}
+        return {
+            "inserted": 0,
+            "skipped": 0,
+            "filtered": filtered_out,
+            "removed": removed_count,
+            "accounts_linked": len(account_id_map),
+        }
 
     rows_df = pd.DataFrame(
         {
@@ -216,5 +235,6 @@ def sync_transactions(owner_email: str, item_id: str) -> dict:
         "inserted": result["inserted"],
         "skipped": result["skipped"],
         "filtered": filtered_out,
+        "removed": removed_count,
         "accounts_linked": len(account_id_map),
     }

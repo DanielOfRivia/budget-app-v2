@@ -87,6 +87,8 @@ else:
                             message += f" {result['skipped']} already on file."
                         if result.get("filtered"):
                             message += f" Ignored {result['filtered']} card payment/transfer(s)."
+                        if result.get("removed"):
+                            message += f" Removed {result['removed']} transaction(s) deleted at the bank."
                         st.success(message)
                     except Exception as e:
                         st.error(f"Sync failed: {e}")

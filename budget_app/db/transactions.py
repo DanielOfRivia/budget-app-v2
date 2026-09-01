@@ -105,6 +105,32 @@ def insert_transactions_by_account_id(rows: list) -> dict:
     return {"inserted": inserted, "skipped": skipped}
 
 
+def delete_transactions_by_external_ids(owner_email: str, external_ids: list) -> int:
+    """Delete this owner's transactions by external_id. Used for Plaid's
+    `removed` list — a transaction Plaid has deleted on its side (commonly a
+    pending charge that never posted, or a reversal) must be removed here too
+    or it lingers forever and quietly skews totals. Scoped through the
+    accounts join so one owner can never delete another's rows."""
+    if not external_ids:
+        return 0
+
+    query = text(
+        """
+        DELETE FROM transactions t
+        USING accounts a
+        WHERE t.account_id = a.id
+          AND a.owner_email = :owner
+          AND t.external_id IN :external_ids
+        """
+    ).bindparams(bindparam("external_ids", expanding=True))
+
+    conn = get_connection()
+    with conn.session as session:
+        result = session.execute(query, {"owner": owner_email, "external_ids": external_ids})
+        session.commit()
+        return result.rowcount or 0
+
+
 def list_transactions(owner_email: str, limit: int = 50) -> pd.DataFrame:
     conn = get_connection()
     return conn.query(
