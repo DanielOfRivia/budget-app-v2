@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 from budget_app.transactions.normalize import build_transaction_frame, detect_source
 from budget_app.db.transactions import insert_transactions, list_transactions
+from budget_app.db.plaid import list_plaid_items
+from budget_app.plaid.sync import complete_hosted_link, create_hosted_link, sync_transactions
 from google.api_core.exceptions import DeadlineExceeded
 from budget_app.ai.gemini_category import categorize_merchants
 
@@ -60,6 +62,67 @@ def save_to_database(df):
 
 
 st.title("Upload & Categorize")
+
+st.subheader("Connect & sync bank accounts")
+owner_email = st.session_state.get("user_email")
+
+if not owner_email:
+    st.info("Sign in to connect a bank account.")
+else:
+    linked_items = list_plaid_items(owner_email)
+
+    if not linked_items.empty:
+        for _, item in linked_items.iterrows():
+            item_col, sync_col = st.columns([3, 1])
+            with item_col:
+                st.write(f"**{item['institution_name'] or 'Linked account'}**")
+                st.caption("Synced before" if pd.notna(item["cursor"]) else "Never synced yet")
+            with sync_col:
+                if st.button("Sync now", key=f"sync_{item['item_id']}"):
+                    try:
+                        with st.spinner("Syncing transactions…"):
+                            result = sync_transactions(owner_email, item["item_id"])
+                        message = f"✅ Synced: {result['inserted']} new transaction(s)."
+                        if result["skipped"]:
+                            message += f" {result['skipped']} already on file."
+                        if result.get("filtered"):
+                            message += f" Ignored {result['filtered']} card payment/transfer(s)."
+                        st.success(message)
+                    except Exception as e:
+                        st.error(f"Sync failed: {e}")
+
+    with st.expander("Connect a new bank account", expanded=linked_items.empty):
+        st.caption(
+            "Opens Plaid in a new tab. Once you've finished there, come back "
+            "and click **I've finished linking**."
+        )
+
+        if st.button("Start linking", key="start_plaid_link"):
+            try:
+                link_token, hosted_url = create_hosted_link(owner_email)
+                st.session_state["plaid_link_token"] = link_token
+                st.session_state["plaid_hosted_url"] = hosted_url
+            except Exception as e:
+                st.error(f"Could not start Plaid Link: {e}")
+
+        hosted_url = st.session_state.get("plaid_hosted_url")
+        if hosted_url:
+            st.link_button("Open Plaid ↗", hosted_url)
+            if st.button("I've finished linking", key="finish_plaid_link"):
+                try:
+                    with st.spinner("Checking with Plaid…"):
+                        item_id = complete_hosted_link(owner_email, st.session_state["plaid_link_token"])
+                    if item_id:
+                        st.session_state.pop("plaid_link_token", None)
+                        st.session_state.pop("plaid_hosted_url", None)
+                        st.success("✅ Bank account linked! Use **Sync now** above to pull in transactions.")
+                        st.rerun()
+                    else:
+                        st.warning("Plaid hasn't recorded a completed link yet. Finish the flow in the Plaid tab, then try again.")
+                except Exception as e:
+                    st.error(f"Failed to complete linking: {e}")
+
+st.divider()
 
 #file uploader for CSV files
 uploaded_files = st.file_uploader(

@@ -27,9 +27,38 @@ def _compute_external_ids(df: pd.DataFrame) -> pd.Series:
     return raw.map(lambda s: hashlib.sha256(s.encode()).hexdigest())
 
 
+def _insert_transaction_row(session, account_id, row) -> bool:
+    """Insert one transaction row against an already-resolved account_id.
+    Returns True if inserted, False if skipped as a duplicate."""
+    result = session.execute(
+        text(
+            """
+            INSERT INTO transactions
+                (date, merchant, amount, account_id, category, source_file, notes, external_id, source)
+            VALUES
+                (:date, :merchant, :amount, :account_id, :category, :source_file, :notes, :external_id, :source)
+            ON CONFLICT (account_id, external_id) DO NOTHING
+            """
+        ),
+        {
+            "date": row["date"],
+            "merchant": row["merchant"],
+            "amount": row["amount"],
+            "account_id": account_id,
+            "category": row.get("category") or None,
+            "source_file": row.get("source_file"),
+            "notes": row.get("notes") or None,
+            "external_id": row["external_id"],
+            "source": row.get("source", "csv"),
+        },
+    )
+    return bool(result.rowcount)
+
+
 def insert_transactions(owner_email: str, df: pd.DataFrame) -> dict:
-    """Insert a batch of transactions for owner_email, skipping any that already
-    exist (same account + external_id). Returns {"inserted": n, "skipped": n}."""
+    """Insert a batch of CSV-sourced transactions for owner_email, resolving
+    each row's account by name, skipping any that already exist (same
+    account + external_id). Returns {"inserted": n, "skipped": n}."""
     if df.empty:
         return {"inserted": 0, "skipped": 0}
 
@@ -45,29 +74,29 @@ def insert_transactions(owner_email: str, df: pd.DataFrame) -> dict:
     with conn.session as session:
         for row in working.to_dict("records"):
             account_id = _get_or_create_account(session, owner_email, str(row["account"]))
-            result = session.execute(
-                text(
-                    """
-                    INSERT INTO transactions
-                        (date, merchant, amount, account_id, category, source_file, notes, external_id, source)
-                    VALUES
-                        (:date, :merchant, :amount, :account_id, :category, :source_file, :notes, :external_id, :source)
-                    ON CONFLICT (account_id, external_id) DO NOTHING
-                    """
-                ),
-                {
-                    "date": row["date"],
-                    "merchant": row["merchant"],
-                    "amount": row["amount"],
-                    "account_id": account_id,
-                    "category": row.get("category") or None,
-                    "source_file": row.get("source_file"),
-                    "notes": row.get("notes") or None,
-                    "external_id": row["external_id"],
-                    "source": row.get("source", "csv"),
-                },
-            )
-            if result.rowcount:
+            if _insert_transaction_row(session, account_id, row):
+                inserted += 1
+            else:
+                skipped += 1
+        session.commit()
+
+    return {"inserted": inserted, "skipped": skipped}
+
+
+def insert_transactions_by_account_id(rows: list) -> dict:
+    """Insert pre-resolved rows (each a dict with an account_id already
+    looked up, plus date/merchant/amount/external_id/etc.) — for sources
+    like Plaid that resolve accounts themselves and already have a stable,
+    Plaid-issued external_id rather than a computed CSV dedup hash."""
+    if not rows:
+        return {"inserted": 0, "skipped": 0}
+
+    conn = get_connection()
+    inserted = 0
+    skipped = 0
+    with conn.session as session:
+        for row in rows:
+            if _insert_transaction_row(session, row["account_id"], row):
                 inserted += 1
             else:
                 skipped += 1

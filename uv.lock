@@ -583,6 +583,15 @@ wheels = [
 ]
 
 [[package]]
+name = "nulltype"
+version = "2.3.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2f/ce/92289851364b7f816a839c8064aac06c01f3a3ecf33ab04adf9d0a0ab66a/nulltype-2.3.1.zip", hash = "sha256:64aa3cb2ab5e904d1b37175b9b922bea268c13f9ce32e3d373313150ab5ef272", size = 20119, upload-time = "2018-06-03T22:01:01.45Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/00/0f/47dde1a3cceac9858da0bfb92d2279bf5f993ed075b72983e92efc297db3/nulltype-2.3.1-py2.py3-none-any.whl", hash = "sha256:16ae565745118e37e0558441f5821c76351d8c3a789640b5bca277cf65b2271b", size = 11054, upload-time = "2018-06-03T22:01:04.03Z" },
+]
+
+[[package]]
 name = "numpy"
 version = "2.4.5"
 source = { registry = "https://pypi.org/simple" }
@@ -690,6 +699,17 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/ba/13/306d275efd3a3453f72114b7431c877d10b1154014c1ebbedd067770d629/pillow-12.2.0-cp314-cp314t-win_amd64.whl", hash = "sha256:6562ace0d3fb5f20ed7290f1f929cae41b25ae29528f2af1722966a0a02e2aa1", size = 7225152, upload-time = "2026-04-01T14:45:50.032Z" },
     { url = "https://files.pythonhosted.org/packages/ff/6e/cf826fae916b8658848d7b9f38d88da6396895c676e8086fc0988073aaf8/pillow-12.2.0-cp314-cp314t-win_arm64.whl", hash = "sha256:aa88ccfe4e32d362816319ed727a004423aab09c5cea43c01a4b435643fa34eb", size = 2556579, upload-time = "2026-04-01T14:45:52.529Z" },
 ]
+
+[[package]]
+name = "plaid-python"
+version = "43.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "nulltype" },
+    { name = "python-dateutil" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c6/02/015896fcac961c2bc0fa7975fc0bcffef97a6fda812866a6c8ea9d7250fd/plaid_python-43.0.0.tar.gz", hash = "sha256:cdca0a8161de3980fbe49fe8081504f63bdda19093915776d1fb06d20ea82c7a", size = 1303963, upload-time = "2026-08-18T15:26:00.129Z" }
 
 [[package]]
 name = "proto-plus"
@@ -1089,10 +1109,12 @@ name = "streamlit-csv-preview"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "cryptography" },
     { name = "google-api-python-client" },
     { name = "google-genai" },
     { name = "gspread" },
     { name = "pandas" },
+    { name = "plaid-python" },
     { name = "psycopg2-binary" },
     { name = "requests-oauthlib" },
     { name = "sqlalchemy" },
@@ -1102,10 +1124,12 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", specifier = ">=48.0.0" },
     { name = "google-api-python-client", specifier = ">=2.197.0" },
     { name = "google-genai", specifier = ">=2.4.0" },
     { name = "gspread", specifier = ">=6.2.1" },
     { name = "pandas", specifier = ">=3.0.3" },
+    { name = "plaid-python", specifier = ">=43.0.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.9" },
     { name = "requests-oauthlib", specifier = ">=2.0.0" },
     { name = "sqlalchemy", specifier = ">=2.0.36" },
