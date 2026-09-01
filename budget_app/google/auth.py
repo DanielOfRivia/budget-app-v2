@@ -63,8 +63,21 @@ def login_to_google():
     if "oauth_token" not in st.session_state:
         authorization_url, state = google.authorization_url(
             'https://accounts.google.com/o/oauth2/auth',
-            access_type="offline", 
+            access_type="offline",
             prompt="select_account"
+        )
+        # app.py's sidebar content (account panel, page nav) never runs on
+        # this branch — it's all after this function's st.stop() — but
+        # Streamlit still reserves the sidebar's collapse toggle regardless
+        # of whether anything's written to it. Hide it explicitly rather
+        # than leave an empty control visible before sign-in.
+        st.html(
+            """
+            <style>
+            [data-testid="stSidebar"],
+            [data-testid="stSidebarCollapsedControl"] { display: none; }
+            </style>
+            """
         )
         st.title("📊 Budget Automation App")
         st.write("Please sign in with your Google Account to process statements and update your budget.")
