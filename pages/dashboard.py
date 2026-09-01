@@ -3,6 +3,7 @@ import pandas as pd
 import streamlit as st
 
 from budget_app.db.dashboard import get_dashboard_transactions
+from budget_app.transactions.categories import CATEGORIES
 
 st.title("📊 Dashboard")
 
@@ -60,10 +61,7 @@ st.subheader("Spend over time")
 # a 10-hue order extended past the skill's 8-hue reference and validated with
 # scripts/validate_palette.js (adjacent-pairs form, matching stacked bars) —
 # ALL CHECKS PASS in both light and dark, so nothing needs to fold away here.
-CATEGORY_COLOR_ORDER = [
-    "Groceries", "Transport", "Eating out", "Health & Wellness", "Fun stuff",
-    "Gifts", "Travel", "Clothes", "Charity", "Other",
-]
+CATEGORY_COLOR_ORDER = CATEGORIES
 CATEGORICAL_LIGHT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948", "#0079a0", "#767a0f"]
 CATEGORICAL_DARK = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767", "#1a96b5", "#8b8f1c"]
 

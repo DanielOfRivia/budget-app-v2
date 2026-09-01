@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from budget_app.transactions.normalize import build_transaction_frame, detect_source
+from budget_app.transactions.categories import CATEGORIES
 from budget_app.db.transactions import insert_transactions, list_transactions
 from budget_app.db.plaid import list_plaid_items
 from budget_app.plaid.sync import complete_hosted_link, create_hosted_link, sync_transactions
@@ -259,7 +260,7 @@ if uploaded_files:
             "category": st.column_config.SelectboxColumn(
                 "category", # The label displayed at the top of the column
                 help="Select the category for this item",
-                options=["Groceries", "Transport", "Eating out", "Health & Wellness", "Fun stuff", "Gifts", "Travel", "Clothes", "Charity", "Other"],
+                options=CATEGORIES,
                 required=True, # Prevents users from leaving it empty
             ),
             "index": None,  # Hide the index column

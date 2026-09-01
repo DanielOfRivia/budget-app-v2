@@ -2,13 +2,19 @@ import pandas as pd
 import streamlit as st
 from st_aggrid import AgGrid, GridOptionsBuilder
 
-from budget_app.db.lending import list_transactions_with_lending, set_lending_settled, set_lent_amount
+from budget_app.db.transactions import (
+    list_transactions_with_lending,
+    set_category,
+    set_lending_settled,
+    set_lent_amount,
+)
+from budget_app.transactions.categories import CATEGORIES
 
-st.title("🤝 Lending")
+st.title("🧾 All Transactions")
 
 owner_email = st.session_state.get("user_email")
 if not owner_email:
-    st.info("Sign in to see lending.")
+    st.info("Sign in to see your transactions.")
     st.stop()
 
 unsettled_only = st.checkbox("Show unsettled only", value=False)
@@ -58,9 +64,9 @@ gb.configure_selection(selection_mode="single", use_checkbox=False, suppressRowC
 gb.configure_default_column(resizable=True, flex=1)
 grid_options = gb.build()
 
-st.caption("Click anywhere in a row to edit its lent amount or settle it.")
-if "lending_grid_generation" not in st.session_state:
-    st.session_state["lending_grid_generation"] = 0
+st.caption("Click anywhere in a row to edit its category, lent amount, or settle it.")
+if "transactions_grid_generation" not in st.session_state:
+    st.session_state["transactions_grid_generation"] = 0
 
 grid_response = AgGrid(
     display_df[table_columns],
@@ -72,18 +78,18 @@ grid_response = AgGrid(
     # key — it's not something session_state can just be cleared to reset
     # like a native widget. Bumping the key mounts a fresh grid instance
     # with no selection, which is how the dialog "closes" after Save.
-    key=f"lending_grid_{st.session_state['lending_grid_generation']}",
+    key=f"transactions_grid_{st.session_state['transactions_grid_generation']}",
 )
 
 selected_data = grid_response.selected_data
 
 
 def _close_dialog():
-    st.session_state["lending_grid_generation"] += 1
+    st.session_state["transactions_grid_generation"] += 1
 
 
-@st.dialog("Edit lending")
-def _edit_lending_dialog(row):
+@st.dialog("Edit transaction")
+def _edit_transaction_dialog(row):
     transaction_id = int(row["id"])
     st.write(f"**{row['merchant']}** — {row['date'].strftime('%Y-%m-%d')}")
 
@@ -91,42 +97,58 @@ def _edit_lending_dialog(row):
     m1.metric("Actual amount", f"${row['amount']:,.2f}")
     m2.metric("Adjusted amount", f"${row['adjusted_amount']:,.2f}")
 
+    # Gemini/CSV categorization only ever runs pre-save — this is the only
+    # way to fix a category after the fact. Falls back to "Other" if the
+    # stored value somehow isn't one of the current options.
+    current_category = row["category"] if row["category"] in CATEGORIES else "Other"
+    new_category = st.selectbox(
+        "Category", CATEGORIES, index=CATEGORIES.index(current_category), key=f"category_{transaction_id}"
+    )
+
     # Percentage of a negative/zero amount (a refund) isn't meaningful, so
     # that mode is only offered for ordinary positive-amount transactions.
     allow_percentage = row["amount"] > 0
-    input_mode = (
-        st.radio("Enter as", ["Dollar amount", "Percentage"], horizontal=True, key=f"lend_mode_{transaction_id}")
-        if allow_percentage
-        else "Dollar amount"
-    )
+
+    mode_col, amount_col = st.columns(2)
+    with mode_col:
+        input_mode = (
+            st.radio("Enter as", ["Dollar amount", "Percentage"], horizontal=True, key=f"lend_mode_{transaction_id}")
+            if allow_percentage
+            else "Dollar amount"
+        )
+
+    with amount_col:
+        if input_mode == "Percentage":
+            current_pct = round(float(row["lent_total"]) / float(row["amount"]) * 100, 1)
+            pct = st.number_input(
+                "Lent (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=current_pct,
+                step=1.0,
+                key=f"lend_pct_{transaction_id}",
+            )
+            new_lent_amount = round(float(row["amount"]) * pct / 100, 2)
+        else:
+            max_value = float(row["amount"]) if row["amount"] > 0 else None
+            new_lent_amount = st.number_input(
+                "Lent amount ($)",
+                min_value=0.0,
+                max_value=max_value,
+                value=float(row["lent_total"]),
+                step=5.0,
+                key=f"lend_amount_{transaction_id}",
+            )
 
     if input_mode == "Percentage":
-        current_pct = round(float(row["lent_total"]) / float(row["amount"]) * 100, 1)
-        pct = st.number_input(
-            "Lent (%)",
-            min_value=0.0,
-            max_value=100.0,
-            value=current_pct,
-            step=1.0,
-            key=f"lend_pct_{transaction_id}",
-        )
-        new_lent_amount = round(float(row["amount"]) * pct / 100, 2)
         st.caption(f"= ${new_lent_amount:,.2f}")
-    else:
-        max_value = float(row["amount"]) if row["amount"] > 0 else None
-        new_lent_amount = st.number_input(
-            "Lent amount ($)",
-            min_value=0.0,
-            max_value=max_value,
-            value=float(row["lent_total"]),
-            step=5.0,
-            key=f"lend_amount_{transaction_id}",
-        )
 
     settled = st.checkbox("Settled", value=bool(row["lent_settled"]), key=f"settled_checkbox_{transaction_id}")
 
     if st.button("Save", key=f"save_lend_{transaction_id}", width="stretch"):
         set_lent_amount(owner_email, transaction_id, new_lent_amount)
+        if new_category != row["category"]:
+            set_category(owner_email, transaction_id, new_category)
         if settled != bool(row["lent_settled"]):
             set_lending_settled(owner_email, transaction_id, settled)
         _close_dialog()
@@ -137,4 +159,4 @@ if selected_data is not None and not selected_data.empty:
     selected_id = int(selected_data.iloc[0]["id"])
     matched = df[df["id"] == selected_id]
     if not matched.empty:
-        _edit_lending_dialog(matched.iloc[0])
+        _edit_transaction_dialog(matched.iloc[0])

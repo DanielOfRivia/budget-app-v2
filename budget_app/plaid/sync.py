@@ -144,6 +144,32 @@ def _is_non_spend(txn, account) -> bool:
     return any(marker in merchant for marker in _NON_SPEND_MERCHANT_MARKERS)
 
 
+def _humanize_plaid_category_part(value: str) -> str:
+    return value.replace("_", " ").strip().capitalize()
+
+
+def _category_hint(txn) -> str | None:
+    """Turn Plaid's own classification (e.g. FOOD_AND_DRINK /
+    FOOD_AND_DRINK_FAST_FOOD) into a readable hint for the Gemini prompt —
+    "Food and drink > Fast food". This is real signal Plaid already computed
+    for free; feeding it in measurably improves categorization of merchant
+    names that are otherwise just noise (verified: an unrecognizable test
+    name fell back to "Other" with no hint, "Transport" with one)."""
+    category = txn.get("personal_finance_category", None)
+    primary = category.get("primary", None) if category is not None else None
+    if not primary:
+        return None
+
+    detailed = category.get("detailed", None) if category is not None else None
+    parts = [_humanize_plaid_category_part(primary)]
+    if detailed:
+        suffix = detailed[len(primary) + 1 :] if detailed.startswith(primary + "_") else detailed
+        cleaned_suffix = _humanize_plaid_category_part(suffix)
+        if cleaned_suffix and cleaned_suffix.lower() != parts[0].lower():
+            parts.append(cleaned_suffix)
+    return " > ".join(parts)
+
+
 def sync_transactions(owner_email: str, item_id: str) -> dict:
     """Pull new/changed transactions for one linked item via /transactions/sync,
     categorize the new ones through the same Gemini path as CSV uploads, and
@@ -213,6 +239,7 @@ def sync_transactions(owner_email: str, item_id: str) -> dict:
             "accounts_linked": len(account_id_map),
         }
 
+    category_hints = [_category_hint(txn) for txn in spend_transactions]
     rows_df = pd.DataFrame(
         {
             "date": txn.date,
@@ -225,7 +252,7 @@ def sync_transactions(owner_email: str, item_id: str) -> dict:
     )
 
     with st.spinner("Categorizing new transactions…"):
-        rows_df["category"] = categorize_merchants(tuple(rows_df["merchant"]))
+        rows_df["category"] = categorize_merchants(tuple(rows_df["merchant"]), hints=tuple(category_hints))
     rows_df["notes"] = ""
     rows_df["source"] = "plaid"
     rows_df["source_file"] = None

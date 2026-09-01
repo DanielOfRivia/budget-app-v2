@@ -3,6 +3,8 @@ from google import genai
 import streamlit as st
 from pathlib import Path
 
+from budget_app.transactions.categories import CATEGORIES
+
 
 def _extract_response_text(response: Any) -> str:
     if response is None:
@@ -70,13 +72,19 @@ def _run_gemini_request(prompt: str, LOGS_DIR: Path) -> str:
         return ""
 
 
-def _build_batch_prompt(merchant_names):
+def _build_batch_prompt(merchant_names, hints=None):
     prompt_lines = [
-        "Assign a single short category for each merchant name below. Choose the best fit from this exact list: Groceries, Transport, Eating out, Health & Wellness, Fun stuff, Gifts, Travel, Clothes, Charity, Other",
+        f"Assign a single short category for each merchant name below. Choose the best fit from this exact list: {', '.join(CATEGORIES)}",
+        "Some merchants include a hint from the bank's own transaction category. "
+        "Treat it as a useful signal, not a strict rule — it uses a different, "
+        "more granular category scheme than the list above.",
         "Return only the category names, one per line, in the same order.",
     ]
-    for merchant in merchant_names:
+    for i, merchant in enumerate(merchant_names):
         prompt_lines.append(f"Merchant: {merchant}")
+        hint = hints[i] if hints else None
+        if hint:
+            prompt_lines.append(f"Bank category hint: {hint}")
         prompt_lines.append("Category:")
     return "\n".join(prompt_lines)
 
@@ -94,7 +102,11 @@ def _lookup_known_categories(merchants: list) -> dict:
         return {}
 
 
-def categorize_merchants(merchants: tuple):
+def categorize_merchants(merchants: tuple, hints: tuple = None):
+    """hints, if given, is a parallel sequence to merchants — e.g. Plaid's own
+    personal_finance_category, humanized. CSV rows have no such signal and
+    pass None. Only used for merchants Gemini actually has to classify;
+    already-known merchants skip it entirely."""
     CURRENT_SCRIPT = Path(__file__).resolve()
     PROJECT_ROOT = CURRENT_SCRIPT.parents[2]
     LOGS_DIR = PROJECT_ROOT / "logs"
@@ -106,10 +118,15 @@ def categorize_merchants(merchants: tuple):
 
     unique_order = []
     seen = set()
-    for merchant in cleaned:
-        if merchant and merchant not in seen:
+    merchant_hint = {}
+    for i, merchant in enumerate(cleaned):
+        if not merchant:
+            continue
+        if merchant not in seen:
             seen.add(merchant)
             unique_order.append(merchant)
+        if merchant not in merchant_hint and hints and i < len(hints) and hints[i]:
+            merchant_hint[merchant] = hints[i]
     if not unique_order:
         return [""] * len(cleaned)
 
@@ -117,7 +134,7 @@ def categorize_merchants(merchants: tuple):
     unknown = [m for m in unique_order if m not in result_map]
 
     if unknown:
-        prompt = _build_batch_prompt(unknown)
+        prompt = _build_batch_prompt(unknown, [merchant_hint.get(m) for m in unknown])
         with open(LOGS_DIR / "prompt.txt", "w", encoding="utf-8") as file:
             file.write(prompt)
 

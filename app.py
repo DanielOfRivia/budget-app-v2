@@ -20,7 +20,7 @@ pages = {
     ],
     "Manage": [
         st.Page("pages/upload.py", title="Upload & Categorize", icon="📥"),
-        st.Page("pages/lending.py", title="Lending", icon="🤝"),
+        st.Page("pages/transactions.py", title="All Transactions", icon="🧾"),
     ],
 }
 
