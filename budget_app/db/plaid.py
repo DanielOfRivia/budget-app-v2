@@ -57,12 +57,20 @@ def get_decrypted_access_token(owner_email: str, item_id: str) -> str:
     return decrypt_token(row[0])
 
 
-def update_cursor(item_id: str, cursor: str) -> None:
+def update_cursor(owner_email: str, item_id: str, cursor: str) -> None:
+    """Owner-scoped even though the only caller (sync_transactions) has
+    already verified ownership via get_decrypted_access_token earlier in the
+    same call — this function shouldn't rely on that being true forever."""
     conn = get_connection()
     with conn.session as session:
         session.execute(
-            text("UPDATE plaid_items SET cursor = :cursor, updated_at = now() WHERE item_id = :item_id"),
-            {"cursor": cursor, "item_id": item_id},
+            text(
+                """
+                UPDATE plaid_items SET cursor = :cursor, updated_at = now()
+                WHERE item_id = :item_id AND owner_email = :owner
+                """
+            ),
+            {"cursor": cursor, "item_id": item_id, "owner": owner_email},
         )
         session.commit()
 
@@ -74,12 +82,18 @@ def upsert_plaid_account(
     its internal id. Checked by plaid_account_id first (definitive re-link
     match) before falling back to the owner+name uniqueness used by the
     manual/CSV path, since a name collision there is a real possibility
-    (e.g. a manually-created "AMEX" account later linked via Plaid too)."""
+    (e.g. a manually-created "AMEX" account later linked via Plaid too).
+
+    The plaid_account_id lookup is also owner-scoped, even though a real
+    Plaid account should never end up linked under two different owners in
+    practice — if that ever did happen, this should error loudly on the
+    UNIQUE constraint below rather than silently hand one owner's account
+    row back for another owner's sync to write into."""
     conn = get_connection()
     with conn.session as session:
         row = session.execute(
-            text("SELECT id FROM accounts WHERE plaid_account_id = :plaid_account_id"),
-            {"plaid_account_id": plaid_account_id},
+            text("SELECT id FROM accounts WHERE plaid_account_id = :plaid_account_id AND owner_email = :owner"),
+            {"plaid_account_id": plaid_account_id, "owner": owner_email},
         ).fetchone()
         if row:
             account_id = row[0]

@@ -211,7 +211,7 @@ def sync_transactions(owner_email: str, item_id: str) -> dict:
         cursor = response.next_cursor
         has_more = response.has_more
 
-    update_cursor(item_id, cursor)
+    update_cursor(owner_email, item_id, cursor)
 
     removed_count = delete_transactions_by_external_ids(owner_email, removed_external_ids)
 
