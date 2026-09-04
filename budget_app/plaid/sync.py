@@ -211,11 +211,12 @@ def sync_transactions(owner_email: str, item_id: str) -> dict:
         cursor = response.next_cursor
         has_more = response.has_more
 
-    update_cursor(owner_email, item_id, cursor)
-
+    # The cursor is only persisted once everything it "vouches for" has been
+    # written — see the comment on the final update_cursor call below.
     removed_count = delete_transactions_by_external_ids(owner_email, removed_external_ids)
 
     if not all_transactions:
+        update_cursor(owner_email, item_id, cursor)
         return {"inserted": 0, "skipped": 0, "filtered": 0, "removed": removed_count, "accounts_linked": 0}
 
     account_id_map = {
@@ -231,6 +232,7 @@ def sync_transactions(owner_email: str, item_id: str) -> dict:
     filtered_out = len(all_transactions) - len(spend_transactions)
 
     if not spend_transactions:
+        update_cursor(owner_email, item_id, cursor)
         return {
             "inserted": 0,
             "skipped": 0,
@@ -243,6 +245,10 @@ def sync_transactions(owner_email: str, item_id: str) -> dict:
     rows_df = pd.DataFrame(
         {
             "date": txn.date,
+            # When the card was actually presented. Differs from the posted
+            # date on most transactions (observed ~79%), so it's the better
+            # anchor for anything asking "where/when did this happen".
+            "authorized_date": txn.get("authorized_date", None),
             "merchant": txn.merchant_name or txn.name,
             "amount": float(txn.amount),
             "account_id": account_id_map.get(txn.account_id),
@@ -258,6 +264,13 @@ def sync_transactions(owner_email: str, item_id: str) -> dict:
     rows_df["source_file"] = None
 
     result = insert_transactions_by_account_id(rows_df.to_dict("records"))
+    # Advancing the cursor is the very last write, deliberately: everything
+    # this page's cursor "vouches for" (removed deletes, account upserts,
+    # inserts) has already committed successfully by this point. Persisting
+    # the cursor any earlier risks permanently skipping transactions on the
+    # next sync if a later step in the same call then fails — Plaid won't
+    # hand them back again once the cursor has moved past them.
+    update_cursor(owner_email, item_id, cursor)
     return {
         "inserted": result["inserted"],
         "skipped": result["skipped"],

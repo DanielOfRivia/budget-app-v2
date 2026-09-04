@@ -34,14 +34,17 @@ def _insert_transaction_row(session, account_id, row) -> bool:
         text(
             """
             INSERT INTO transactions
-                (date, merchant, amount, account_id, category, source_file, notes, external_id, source)
+                (date, authorized_date, merchant, amount, account_id, category, source_file, notes, external_id, source)
             VALUES
-                (:date, :merchant, :amount, :account_id, :category, :source_file, :notes, :external_id, :source)
+                (:date, :authorized_date, :merchant, :amount, :account_id, :category, :source_file, :notes, :external_id, :source)
             ON CONFLICT (account_id, external_id) DO NOTHING
             """
         ),
         {
             "date": row["date"],
+            # CSV rows have no authorization date; NULL falls back to `date`
+            # via the occurred_on column in transactions_full.
+            "authorized_date": row.get("authorized_date"),
             "merchant": row["merchant"],
             "amount": row["amount"],
             "account_id": account_id,
@@ -196,6 +199,87 @@ def delete_transactions_by_external_ids(owner_email: str, external_ids: list) ->
         return result.rowcount or 0
 
 
+def link_refund(owner_email: str, refund_transaction_id: int, original_transaction_id: int) -> None:
+    """Mark refund_transaction_id (a negative-amount row) as a refund of
+    original_transaction_id (a positive-amount row), same account only.
+    Fetch-then-validate rather than baking the checks into the UPDATE's
+    WHERE clause, so a bad link fails with a clear reason instead of a
+    silent no-op update. Ownership is fully covered by the same-account
+    check: an account belongs to exactly one owner, so if the original
+    shares the refund's account, it's already provably the same owner's."""
+    conn = get_connection()
+    with conn.session as session:
+        row = session.execute(
+            text(
+                """
+                SELECT refund.account_id AS refund_account_id, refund.amount AS refund_amount,
+                       orig.account_id AS orig_account_id, orig.amount AS orig_amount
+                FROM transactions refund
+                JOIN accounts a ON a.id = refund.account_id
+                JOIN transactions orig ON orig.id = :original_id
+                WHERE refund.id = :refund_id AND a.owner_email = :owner
+                """
+            ),
+            {"refund_id": refund_transaction_id, "original_id": original_transaction_id, "owner": owner_email},
+        ).fetchone()
+
+        if row is None:
+            raise ValueError("Transaction not found for this owner")
+        if row.refund_amount >= 0:
+            raise ValueError("Only a negative-amount transaction can be linked as a refund")
+        if row.orig_account_id != row.refund_account_id:
+            raise ValueError("A refund can only be linked to a purchase on the same account")
+        if row.orig_amount <= 0:
+            raise ValueError("A refund must be linked to a positive-amount purchase")
+
+        session.execute(
+            text(
+                "UPDATE transactions SET refund_of_transaction_id = :original_id, updated_at = now() WHERE id = :refund_id"
+            ),
+            {"original_id": original_transaction_id, "refund_id": refund_transaction_id},
+        )
+        session.commit()
+
+
+def unlink_refund(owner_email: str, refund_transaction_id: int) -> None:
+    conn = get_connection()
+    with conn.session as session:
+        session.execute(
+            text(
+                """
+                UPDATE transactions t
+                SET refund_of_transaction_id = NULL, updated_at = now()
+                FROM accounts a
+                WHERE t.account_id = a.id AND a.owner_email = :owner AND t.id = :transaction_id
+                """
+            ),
+            {"owner": owner_email, "transaction_id": refund_transaction_id},
+        )
+        session.commit()
+
+
+def search_refund_candidates(owner_email: str, account_id: int, query: str, limit: int = 20) -> pd.DataFrame:
+    """Positive-amount transactions on the given account matching a text
+    search, for the refund-link picker — searches full history, not just
+    whatever date range the dashboard happens to be filtered to."""
+    conn = get_connection()
+    return conn.query(
+        """
+        SELECT t.id, t.date, t.merchant, t.amount
+        FROM transactions t
+        JOIN accounts a ON a.id = t.account_id
+        WHERE a.owner_email = :owner
+          AND t.account_id = :account_id
+          AND t.amount > 0
+          AND t.merchant ILIKE :query
+        ORDER BY t.date DESC
+        LIMIT :limit
+        """,
+        params={"owner": owner_email, "account_id": account_id, "query": f"%{query}%", "limit": limit},
+        ttl=0,
+    )
+
+
 def list_transactions(owner_email: str, limit: int = 50) -> pd.DataFrame:
     conn = get_connection()
     return conn.query(
@@ -213,11 +297,28 @@ def list_transactions(owner_email: str, limit: int = 50) -> pd.DataFrame:
     )
 
 
-def list_transactions_with_lending(owner_email: str, unsettled_only: bool = False, start_date=None) -> pd.DataFrame:
+def list_transactions_with_lending(
+    owner_email: str,
+    unsettled_only: bool = False,
+    start_date=None,
+    end_date=None,
+    categories: list = None,
+    accounts: list = None,
+    merchant_search: str = None,
+    refund_state: str = None,
+) -> pd.DataFrame:
+    """refund_state: None (any), "linked" (is a refund or has one), or
+    "unlinked" (neither side of a refund link).
+
+    Filtered and ordered by occurred_on (when the charge actually happened),
+    not the posted date — that's the date the UI shows, so a date-range filter
+    has to agree with it or the visible rows won't match the range."""
     conn = get_connection()
     sql = """
-        SELECT id, date, merchant, account_name, category, amount, lent_total,
-               adjusted_amount, lent_settled, lent_settled_date, has_unsettled_lend
+        SELECT id, account_id, date, merchant, account_name, category, amount, lent_total,
+               adjusted_amount, lent_settled, lent_settled_date, has_unsettled_lend,
+               refund_of_transaction_id, refund_of_merchant, refund_of_date,
+               refunded_by_amount, refunded_by_date, refunded_by_transaction_id, refunded_by_merchant, occurred_on
         FROM transactions_full
         WHERE owner_email = :owner
     """
@@ -225,9 +326,73 @@ def list_transactions_with_lending(owner_email: str, unsettled_only: bool = Fals
     if unsettled_only:
         sql += " AND has_unsettled_lend = true"
     if start_date is not None:
-        sql += " AND date >= :start_date"
+        sql += " AND occurred_on >= :start_date"
         params["start_date"] = start_date
-    sql += " ORDER BY date DESC"
+    if end_date is not None:
+        sql += " AND occurred_on <= :end_date"
+        params["end_date"] = end_date
+    if categories:
+        sql += " AND category = ANY(:categories)"
+        params["categories"] = list(categories)
+    if accounts:
+        sql += " AND account_name = ANY(:accounts)"
+        params["accounts"] = list(accounts)
+    if merchant_search:
+        sql += " AND merchant ILIKE :merchant_search"
+        params["merchant_search"] = f"%{merchant_search}%"
+    if refund_state == "linked":
+        sql += " AND (refund_of_transaction_id IS NOT NULL OR refunded_by_amount IS NOT NULL)"
+    elif refund_state == "unlinked":
+        sql += " AND refund_of_transaction_id IS NULL AND refunded_by_amount IS NULL"
+    sql += " ORDER BY occurred_on DESC"
+
+    return conn.query(sql, params=params, ttl=0)
+
+
+def get_transaction(owner_email: str, transaction_id: int):
+    """Fetch one transaction by id, ignoring any list filters — used when
+    jumping to a linked refund/purchase that the current filters might
+    exclude. Returns a Series, or None if not found for this owner."""
+    conn = get_connection()
+    df = conn.query(
+        """
+        SELECT id, account_id, date, merchant, account_name, category, amount, lent_total,
+               adjusted_amount, lent_settled, lent_settled_date, has_unsettled_lend,
+               refund_of_transaction_id, refund_of_merchant, refund_of_date,
+               refunded_by_amount, refunded_by_date, refunded_by_transaction_id, refunded_by_merchant, occurred_on
+        FROM transactions_full
+        WHERE owner_email = :owner AND id = :transaction_id
+        """,
+        params={"owner": owner_email, "transaction_id": transaction_id},
+        ttl=0,
+    )
+    if df.empty:
+        return None
+    row = df.iloc[0].copy()
+    row["date"] = pd.to_datetime(row["occurred_on"])
+    return row
+
+
+def list_transactions_for_period(owner_email: str, month_start, month_end, category: str = None) -> pd.DataFrame:
+    """Transactions behind a single point on a dashboard chart.
+
+    Filtered on effective_date, not date, to match how the charts bucket
+    months — otherwise a refund linked to an earlier purchase would be
+    missing from the very list you opened to explain that month's number."""
+    conn = get_connection()
+    sql = """
+        SELECT occurred_on, merchant, category, account_name, amount, lent_total, adjusted_amount,
+               refund_of_transaction_id, refunded_by_amount
+        FROM transactions_full
+        WHERE owner_email = :owner
+          AND effective_date >= :month_start
+          AND effective_date <= :month_end
+    """
+    params = {"owner": owner_email, "month_start": month_start, "month_end": month_end}
+    if category is not None:
+        sql += " AND category = :category"
+        params["category"] = category
+    sql += " ORDER BY adjusted_amount DESC, occurred_on DESC"
 
     return conn.query(sql, params=params, ttl=0)
 

@@ -1,91 +1,79 @@
-from typing import Any
-from google import genai
-import streamlit as st
+import json
 from pathlib import Path
+
+import streamlit as st
+from google import genai
+from google.genai import types
 
 from budget_app.transactions.categories import CATEGORIES
 
+# Chunk size for a single Gemini call. The old approach sent every unique
+# merchant in one request and matched the reply back *by line position* — but
+# the model doesn't reliably emit exactly one line per item over a long list
+# (observed: 182 merchants in, 177 lines back, finish_reason=STOP, well under
+# the token cap — a silent miscount with no API-level signal). Short replies
+# blanked the tail; drift mid-reply shifted every later category onto the
+# wrong merchant. Smaller chunks plus name-based matching below make a
+# miscount cost a few blanks instead of corrupting the rest.
+BATCH_SIZE = 40
 
-def _extract_response_text(response: Any) -> str:
-    if response is None:
-        return ""
-
-    if isinstance(response, str):
-        return response
-
-    if hasattr(response, "text") and isinstance(response.text, str):
-        return response.text
-
-    if hasattr(response, "output_text") and isinstance(response.output_text, str):
-        return response.output_text
-
-    if isinstance(response, dict):
-        if "output_text" in response and isinstance(response["output_text"], str):
-            return response["output_text"]
-        if "candidates" in response and response["candidates"]:
-            first = response["candidates"][0]
-            if isinstance(first, dict):
-                return str(first.get("output", ""))
-        if "output" in response:
-            output = response["output"]
-            if isinstance(output, str):
-                return output
-            if isinstance(output, dict) and isinstance(output.get("text"), str):
-                return output["text"]
-
-    if hasattr(response, "to_dict"):
-        try:
-            return _extract_response_text(response.to_dict())
-        except Exception:
-            pass
-
-    if isinstance(response, list) and response:
-        return _extract_response_text(response[0])
-
-    return ""
+_RESPONSE_SCHEMA = types.Schema(
+    type="ARRAY",
+    items=types.Schema(
+        type="OBJECT",
+        properties={
+            "merchant": types.Schema(type="STRING"),
+            # enum: the model can't invent a category outside the app's list.
+            "category": types.Schema(type="STRING", enum=CATEGORIES),
+        },
+        required=["merchant", "category"],
+    ),
+)
 
 
-def _run_gemini_request(prompt: str, LOGS_DIR: Path) -> str:
+def _run_gemini_request(prompt: str, LOGS_DIR: Path) -> list:
+    """Return a list of {"merchant": ..., "category": ...} dicts, or [] on any
+    failure. Structured output guarantees the shape and a valid category, but
+    NOT one entry per merchant — the caller still matches by name."""
     try:
         api_key = st.secrets["GEMINI_API_KEY"]
-    except KeyError:
-        print("GEMINI_API_KEY not set")
-        return ""
-
-    try:
         model = st.secrets["GEMINI_MODEL"]
-    except KeyError:
-        print("GEMINI_MODEL not set")
-        return ""
+    except KeyError as exc:
+        print("Gemini secret not set:", exc)
+        return []
 
     try:
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
             model=model,
-            contents=prompt
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=_RESPONSE_SCHEMA,
+            ),
         )
         with open(LOGS_DIR / "raw_response.txt", "w", encoding="utf-8") as file:
             file.write(str(response))
-        return _extract_response_text(response)
+
+        parsed = json.loads(response.text)
+        return parsed if isinstance(parsed, list) else []
     except Exception as exc:
         print("Gemini SDK error:", exc)
-        return ""
+        return []
 
 
 def _build_batch_prompt(merchant_names, hints=None):
     prompt_lines = [
-        f"Assign a single short category for each merchant name below. Choose the best fit from this exact list: {', '.join(CATEGORIES)}",
+        f"Assign one category to each merchant below, choosing only from: {', '.join(CATEGORIES)}",
+        "Return one object per merchant, echoing the merchant name back exactly as given.",
         "Some merchants include a hint from the bank's own transaction category. "
         "Treat it as a useful signal, not a strict rule — it uses a different, "
         "more granular category scheme than the list above.",
-        "Return only the category names, one per line, in the same order.",
+        "",
     ]
     for i, merchant in enumerate(merchant_names):
-        prompt_lines.append(f"Merchant: {merchant}")
         hint = hints[i] if hints else None
-        if hint:
-            prompt_lines.append(f"Bank category hint: {hint}")
-        prompt_lines.append("Category:")
+        prompt_lines.append(f"- {merchant}" + (f"  (bank hint: {hint})" if hint else ""))
     return "\n".join(prompt_lines)
 
 
@@ -100,6 +88,31 @@ def _lookup_known_categories(merchants: list) -> dict:
     except Exception as exc:
         print("Known-category lookup failed:", exc)
         return {}
+
+
+def _categorize_chunk(merchants: list, hints: list, LOGS_DIR: Path) -> dict:
+    """One Gemini call for up to BATCH_SIZE merchants. Results are matched back
+    by merchant name (case-insensitively), never by position, so a short or
+    over-long reply can only leave merchants uncategorized — it can never
+    shift a category onto the wrong merchant."""
+    prompt = _build_batch_prompt(merchants, hints)
+    with open(LOGS_DIR / "prompt.txt", "w", encoding="utf-8") as file:
+        file.write(prompt)
+
+    entries = _run_gemini_request(prompt, LOGS_DIR)
+    with open(LOGS_DIR / "response.txt", "w", encoding="utf-8") as file:
+        file.write(json.dumps(entries, indent=2))
+
+    by_name = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("merchant", "")).strip().lower()
+        category = entry.get("category")
+        if name and category in CATEGORIES:
+            by_name[name] = category
+
+    return {m: by_name[m.strip().lower()] for m in merchants if m.strip().lower() in by_name}
 
 
 def categorize_merchants(merchants: tuple, hints: tuple = None):
@@ -133,20 +146,10 @@ def categorize_merchants(merchants: tuple, hints: tuple = None):
     result_map = _lookup_known_categories(unique_order)
     unknown = [m for m in unique_order if m not in result_map]
 
-    if unknown:
-        prompt = _build_batch_prompt(unknown, [merchant_hint.get(m) for m in unknown])
-        with open(LOGS_DIR / "prompt.txt", "w", encoding="utf-8") as file:
-            file.write(prompt)
-
-        raw_output = _run_gemini_request(prompt, LOGS_DIR)
-        with open(LOGS_DIR / "response.txt", "w", encoding="utf-8") as file:
-            file.write(raw_output)
-        categories = [line.strip() for line in str(raw_output).splitlines() if line.strip()]
-
-        for merchant, category in zip(unknown, categories):
-            result_map[merchant] = category
-        for merchant in unknown[len(categories):]:
-            result_map[merchant] = ""
+    for start in range(0, len(unknown), BATCH_SIZE):
+        chunk = unknown[start : start + BATCH_SIZE]
+        chunk_hints = [merchant_hint.get(m) for m in chunk]
+        result_map.update(_categorize_chunk(chunk, chunk_hints, LOGS_DIR))
 
     return [result_map.get(m, "") if m else "" for m in cleaned]
 

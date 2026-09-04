@@ -3,6 +3,7 @@ import pandas as pd
 import streamlit as st
 
 from budget_app.db.dashboard import get_dashboard_transactions
+from budget_app.db.transactions import list_transactions_for_period
 from budget_app.transactions.categories import CATEGORIES
 
 st.title("📊 Dashboard")
@@ -33,10 +34,29 @@ if df.empty:
     st.info("No transactions yet. Head to **Upload & Categorize** to add some.")
     st.stop()
 
-df["date"] = pd.to_datetime(df["date"])
+df["effective_date"] = pd.to_datetime(df["effective_date"])
 df["category"] = df["category"].fillna("").replace("", "Uncategorized")
-df["month"] = df["date"].dt.to_period("M").dt.to_timestamp()
+# Trend/month grouping uses effective_date — the date the charge actually
+# happened, and for a linked refund the date its *original purchase*
+# happened, so the refund nets against that month rather than its own.
+# See get_dashboard_transactions.
+df["month"] = df["effective_date"].dt.to_period("M").dt.to_timestamp()
 df["month_label"] = df["month"].dt.strftime("%b %Y")
+
+def _selected_months(event, param_name):
+    """Pull month labels out of an Altair chart selection.
+
+    Both charts are layered, and a layer can carry data with no month_label
+    at all — the category chart's dashed limit rule only has limit/series,
+    and it spans the full chart width, making it an easy accidental click
+    target (this raised KeyError: 'month_label'). Skip any datum missing the
+    field instead of assuming every selected point carries it."""
+    if event is None:
+        return []
+    selection = event["selection"] if isinstance(event, dict) else event.selection
+    points = selection.get(param_name) or []
+    return [p["month_label"] for p in points if isinstance(p, dict) and p.get("month_label")]
+
 
 theme_base = st.context.theme.type or "light"
 bar_color = "#3987e5" if theme_base == "dark" else "#2a78d6"
@@ -146,12 +166,7 @@ with bar_col:
         pivot.index.name = "Month"
         st.dataframe(pivot, width="stretch")
 
-if bar_event is not None:
-    selection = bar_event["selection"] if isinstance(bar_event, dict) else bar_event.selection
-else:
-    selection = {}
-selected_points = selection.get("month_click", [])
-selected_months = [pt["month_label"] for pt in selected_points]
+selected_months = _selected_months(bar_event, "month_click")
 
 with pie_col:
     if selected_months:
@@ -290,6 +305,9 @@ chart_col, stats_col = st.columns([3, 1])
 # threshold, not a series), so it uses the reserved status "critical" red —
 # both get a name via the shared "series" field so one small legend
 # distinguishes them.
+line_month_click = alt.selection_point(
+    fields=["month_label"], on="click", empty=True, name="line_month_click"
+)
 spend_line = (
     alt.Chart(category_monthly.assign(series="Spend"))
     .mark_line(point=alt.OverlayMarkDef(size=80), strokeWidth=2)
@@ -306,6 +324,7 @@ spend_line = (
             alt.Tooltip("adjusted_amount:Q", title="Adjusted spend", format="$,.2f"),
         ],
     )
+    .add_params(line_month_click)
 )
 limit_rule = (
     alt.Chart(pd.DataFrame({"limit": [limit_value], "series": ["Monthly limit"]}))
@@ -317,7 +336,13 @@ limit_rule = (
     )
 )
 with chart_col:
-    st.altair_chart((spend_line + limit_rule).properties(height=320), width="stretch")
+    st.caption("Click a point to list that month's transactions below.")
+    line_event = st.altair_chart(
+        (spend_line + limit_rule).properties(height=320),
+        width="stretch",
+        on_select="rerun",
+        key="category_line_chart",
+    )
 
     with st.expander("View as table"):
         st.dataframe(
@@ -365,3 +390,116 @@ with stats_col:
         st.metric("Spent this year", f"${total_this_year:,.2f}")
         st.divider()
         st.metric("Left for this year", f"${total_left_this_year:,.2f}")
+
+
+st.divider()
+st.html('<div id="txn-list-anchor"></div>')
+st.subheader("Transactions")
+
+
+line_months = _selected_months(line_event, "line_month_click")
+
+# Both charts can hold a selection at once, so track which was clicked most
+# recently — otherwise a stale line-chart selection would silently override a
+# fresh click on the bar chart.
+scroll_to_list = False
+if selected_months != st.session_state.get("_prev_bar_months") and selected_months:
+    st.session_state["_txn_list_source"] = "bar"
+    scroll_to_list = True
+if line_months != st.session_state.get("_prev_line_months") and line_months:
+    st.session_state["_txn_list_source"] = "line"
+    scroll_to_list = True
+st.session_state["_prev_bar_months"] = selected_months
+st.session_state["_prev_line_months"] = line_months
+
+source = st.session_state.get("_txn_list_source")
+if source == "line" and not line_months:
+    source = "bar" if selected_months else None
+if source == "bar" and not selected_months:
+    source = "line" if line_months else None
+
+if source == "line":
+    period_label, period_category = line_months[0], selected_category
+elif source == "bar":
+    period_label, period_category = selected_months[0], None
+else:
+    period_label, period_category = None, None
+
+if period_label is None:
+    st.caption(
+        "Click a bar above (all categories for that month) or a point on the "
+        "category line chart (that category only) to list the transactions behind it."
+    )
+else:
+    month_start = pd.to_datetime(period_label, format="%b %Y")
+    month_end = month_start + pd.offsets.MonthEnd(1)
+    detail = list_transactions_for_period(
+        owner_email, month_start.date(), month_end.date(), category=period_category
+    )
+
+    scope = f"{period_category} — {period_label}" if period_category else f"All categories — {period_label}"
+    st.caption(f"**{scope}** · {len(detail)} transactions · adjusted total ${detail['adjusted_amount'].sum():,.2f}")
+
+    if detail.empty:
+        st.info("No transactions in this period.")
+    else:
+        shown = detail.copy()
+        shown["date"] = pd.to_datetime(shown["occurred_on"]).dt.strftime("%Y-%m-%d")
+        shown["Refund"] = [
+            "↩ refund" if pd.notna(r) else ("↩ refunded" if pd.notna(b) else "")
+            for r, b in zip(shown["refund_of_transaction_id"], shown["refunded_by_amount"])
+        ]
+        st.dataframe(
+            shown[["date", "merchant", "category", "account_name", "amount", "lent_total", "adjusted_amount", "Refund"]]
+            .rename(
+                columns={
+                    "date": "Date",
+                    "merchant": "Merchant",
+                    "category": "Category",
+                    "account_name": "Account",
+                    "amount": "Actual",
+                    "lent_total": "Lent",
+                    "adjusted_amount": "Adjusted",
+                }
+            ),
+            hide_index=True,
+            width="stretch",
+        )
+
+
+# Scroll down to the list only when a click actually *changed* the selection.
+# Doing it on every rerun would fight the user — any unrelated widget change
+# would yank them back down while they're reading the charts.
+#
+# st.html is not iframed, so this runs in the main page context and can reach
+# the anchor directly (a components.v1.html iframe would need window.parent).
+# rAF + a retry covers the anchor not being laid out yet on the frame the
+# script first runs.
+#
+# The nonce matters: emitting byte-identical HTML at the same position lets
+# Streamlit's DOM reconciliation reuse the existing node, and a <script> only
+# executes when it's actually inserted — so without this it scrolled on the
+# first click and never again. Only this integer is interpolated, so
+# unsafe_allow_javascript carries no injection surface.
+if scroll_to_list:
+    scroll_nonce = st.session_state.get("_scroll_nonce", 0) + 1
+    st.session_state["_scroll_nonce"] = scroll_nonce
+    st.html(
+        f"""
+        <script data-scroll-nonce="{scroll_nonce}">
+        (function () {{
+          let tries = 0;
+          function jump() {{
+            const el = window.document.getElementById("txn-list-anchor");
+            if (el) {{
+              el.scrollIntoView({{ behavior: "smooth", block: "start" }});
+            }} else if (tries++ < 10) {{
+              window.requestAnimationFrame(jump);
+            }}
+          }}
+          window.requestAnimationFrame(jump);
+        }})();
+        </script>
+        """,
+        unsafe_allow_javascript=True,
+    )
