@@ -11,6 +11,7 @@ from budget_app.db.transactions import (
     set_category,
     set_lending_settled,
     set_lent_amount,
+    set_notes,
     unlink_refund,
 )
 from budget_app.transactions.categories import CATEGORIES
@@ -22,35 +23,45 @@ if not owner_email:
     st.info("Sign in to see your transactions.")
     st.stop()
 
-RANGE_OPTIONS = ["All time", "Last 3 months", "Last 6 months", "Last 12 months", "Year to date"]
+if "txn_filters_generation" not in st.session_state:
+    st.session_state["txn_filters_generation"] = 0
+gen = st.session_state["txn_filters_generation"]
 
-filter_row1 = st.columns([1, 2, 2])
+filter_row1 = st.columns([1, 1, 2, 2])
 with filter_row1[0]:
-    # Same preset vocabulary as the dashboard's time range, for consistency.
-    # Defaults to All time so enabling filters never silently hides rows that
-    # were visible before.
-    range_label = st.selectbox("Time range", RANGE_OPTIONS, index=0)
+    # Left empty (None), a date range filters nothing — same "defaults to
+    # everything visible" rule the other filters follow.
+    start_date = st.date_input("From", value=None, format="YYYY-MM-DD", key=f"filter_start_{gen}")
 with filter_row1[1]:
-    selected_categories = st.multiselect("Categories", CATEGORIES, placeholder="All categories")
+    end_date = st.date_input("To", value=None, format="YYYY-MM-DD", key=f"filter_end_{gen}")
 with filter_row1[2]:
+    selected_categories = st.multiselect(
+        "Categories", CATEGORIES, placeholder="All categories", key=f"filter_categories_{gen}"
+    )
+with filter_row1[3]:
     account_names = list_accounts(owner_email)["name"].to_list()
-    selected_accounts = st.multiselect("Accounts", account_names, placeholder="All accounts")
+    selected_accounts = st.multiselect(
+        "Accounts", account_names, placeholder="All accounts", key=f"filter_accounts_{gen}"
+    )
 
-filter_row2 = st.columns([2, 2, 1])
+filter_row2 = st.columns([2, 2, 1, 1])
 with filter_row2[0]:
-    merchant_search = st.text_input("Merchant contains", placeholder="e.g. uber")
+    merchant_search = st.text_input("Merchant contains", placeholder="e.g. uber", key=f"filter_merchant_{gen}")
 with filter_row2[1]:
-    refund_label = st.selectbox("Refunds", ["Any", "Linked to a refund", "Not linked"])
+    refund_label = st.selectbox(
+        "Refunds", ["Any", "Linked to a refund", "Not linked"], key=f"filter_refund_{gen}"
+    )
 with filter_row2[2]:
-    unsettled_only = st.checkbox("Unsettled lending only", value=False)
-
-today = pd.Timestamp.today().normalize()
-if range_label == "All time":
-    start_date = None
-elif range_label == "Year to date":
-    start_date = pd.Timestamp(today.year, 1, 1).date()
-else:
-    start_date = (today - pd.DateOffset(months=int(range_label.split()[1]))).date()
+    unsettled_only = st.checkbox("Unsettled lending only", value=False, key=f"filter_unsettled_{gen}")
+with filter_row2[3]:
+    # Widgets above are keyed by `gen` rather than session_state directly —
+    # like the transactions grid's own key bump, that's what lets this reset
+    # them: a widget's value can't be cleared by writing to its key while it's
+    # in use, but a fresh key with no stored value renders at its default.
+    st.write("")
+    if st.button("Clear filters", width="stretch"):
+        st.session_state["txn_filters_generation"] += 1
+        st.rerun()
 
 refund_state = {"Any": None, "Linked to a refund": "linked", "Not linked": "unlinked"}[refund_label]
 
@@ -58,6 +69,7 @@ df = list_transactions_with_lending(
     owner_email,
     unsettled_only=unsettled_only,
     start_date=start_date,
+    end_date=end_date,
     categories=selected_categories or None,
     accounts=selected_accounts or None,
     merchant_search=merchant_search or None,
@@ -65,7 +77,13 @@ df = list_transactions_with_lending(
 )
 
 filters_active = bool(
-    start_date or selected_categories or selected_accounts or merchant_search or refund_state or unsettled_only
+    start_date
+    or end_date
+    or selected_categories
+    or selected_accounts
+    or merchant_search
+    or refund_state
+    or unsettled_only
 )
 
 if df.empty:
@@ -146,16 +164,25 @@ grid_response = AgGrid(
     height=350,
     # AG Grid persists its selection client-side, keyed by this component
     # key — it's not something session_state can just be cleared to reset
-    # like a native widget. Bumping the key mounts a fresh grid instance
-    # with no selection, which is how the dialog "closes" after Save.
+    # like a native widget. The key only bumps for a jump-to-linked-row
+    # navigation (see _jump_button); a plain Save leaves it alone so the
+    # table's scroll position, sort, and column widths survive editing a
+    # transaction — see _close_dialog for how the dialog still closes.
     key=f"transactions_grid_{st.session_state['transactions_grid_generation']}",
 )
 
 selected_data = grid_response.selected_data
 
 
-def _close_dialog():
-    st.session_state["transactions_grid_generation"] += 1
+def _close_dialog(transaction_id):
+    # Deliberately doesn't bump transactions_grid_generation: that would
+    # remount the whole grid to clear its selection, losing scroll position,
+    # sort, and column widths on every single save. Instead, remember which
+    # row was just saved so the dispatch logic below skips reopening it while
+    # it's still the (unchanged) selection — re-editing it again needs a
+    # different row clicked first, same as the jump-navigation path already
+    # requires today.
+    st.session_state["_dismissed_txn_id"] = transaction_id
     st.session_state.pop("_open_txn_id", None)
 
 
@@ -185,6 +212,16 @@ def _edit_transaction_dialog(row):
     current_category = row["category"] if row["category"] in CATEGORIES else "Other"
     new_category = st.selectbox(
         "Category", CATEGORIES, index=CATEGORIES.index(current_category), key=f"category_{transaction_id}"
+    )
+
+    # A NULL notes column comes back from the DB as pandas NaN (a float), and
+    # NaN is truthy in Python (`nan or ""` returns nan, not "") — pd.isna is
+    # the actual null check needed here, or the widget renders the string
+    # "nan" for every transaction that has no comment.
+    current_notes = row.get("notes")
+    current_notes = "" if pd.isna(current_notes) else str(current_notes)
+    new_notes = st.text_input(
+        "Comments", value=current_notes, key=f"notes_{transaction_id}", placeholder="Add a note…"
     )
 
     # Opt-in refund linking, only offered for negative-amount rows — most
@@ -253,11 +290,28 @@ def _edit_transaction_dialog(row):
     new_lent_amount = None
     settled = None
     if row["amount"] > 0:
+        st.divider()
+        st.subheader("Lending")
+
+        amount_key = f"lend_amount_{transaction_id}"
+        mode_key = f"lend_mode_{transaction_id}"
+
+        # Half/Full cover the two splits actually used in practice — set the
+        # dollar field directly rather than making every lend go through the
+        # percentage field just to hit 50 or 100. Setting session_state here,
+        # before the radio/number_input below are instantiated, is what makes
+        # the click take effect on this same rerun.
+        half_col, full_col = st.columns(2)
+        if half_col.button("½ Half", key=f"lend_half_{transaction_id}", width="stretch"):
+            st.session_state[mode_key] = "Dollar amount"
+            st.session_state[amount_key] = round(float(row["amount"]) / 2, 2)
+        if full_col.button("Full", key=f"lend_full_{transaction_id}", width="stretch"):
+            st.session_state[mode_key] = "Dollar amount"
+            st.session_state[amount_key] = float(row["amount"])
+
         mode_col, amount_col = st.columns(2)
         with mode_col:
-            input_mode = st.radio(
-                "Enter as", ["Dollar amount", "Percentage"], horizontal=True, key=f"lend_mode_{transaction_id}"
-            )
+            input_mode = st.radio("Enter as", ["Dollar amount", "Percentage"], horizontal=True, key=mode_key)
 
         with amount_col:
             if input_mode == "Percentage":
@@ -278,7 +332,7 @@ def _edit_transaction_dialog(row):
                     max_value=float(row["amount"]),
                     value=float(row["lent_total"]),
                     step=5.0,
-                    key=f"lend_amount_{transaction_id}",
+                    key=amount_key,
                 )
 
         if input_mode == "Percentage":
@@ -291,6 +345,8 @@ def _edit_transaction_dialog(row):
             set_lent_amount(owner_email, transaction_id, new_lent_amount)
         if new_category != row["category"]:
             set_category(owner_email, transaction_id, new_category)
+        if new_notes != current_notes:
+            set_notes(owner_email, transaction_id, new_notes)
         if settled is not None and settled != bool(row["lent_settled"]):
             set_lending_settled(owner_email, transaction_id, settled)
         if unlink_requested:
@@ -303,12 +359,31 @@ def _edit_transaction_dialog(row):
             except ValueError as e:
                 st.error(str(e))
                 st.stop()
-        _close_dialog()
+        _close_dialog(transaction_id)
         st.rerun()
 
 
 jump_id = st.session_state.get("_open_txn_id")
-if jump_id is not None:
+dismissed_id = st.session_state.get("_dismissed_txn_id")
+
+# A live grid selection always wins over a pending jump target. AG Grid's
+# selection persists client-side across reruns (same key), but _open_txn_id
+# only gets cleared on Save — dismissing the dialog with the X leaves it set,
+# and without this ordering every later row click would keep reopening the
+# jumped-to transaction instead of the one just clicked.
+if selected_data is not None and not selected_data.empty:
+    selected_id = int(selected_data.iloc[0]["id"])
+    if selected_id == dismissed_id:
+        # Same row still selected right after its own Save — the grid wasn't
+        # remounted, so this isn't a new click, it's the stale selection.
+        pass
+    else:
+        st.session_state.pop("_dismissed_txn_id", None)
+        matched = df[df["id"] == selected_id]
+        if not matched.empty:
+            st.session_state.pop("_open_txn_id", None)
+            _edit_transaction_dialog(matched.iloc[0])
+elif jump_id is not None:
     # Fetched by id rather than looked up in df, so jumping to a linked
     # transaction works even when the current filters exclude it.
     jumped_row = get_transaction(owner_email, jump_id)
@@ -316,8 +391,3 @@ if jump_id is not None:
         _edit_transaction_dialog(jumped_row)
     else:
         st.session_state.pop("_open_txn_id", None)
-elif selected_data is not None and not selected_data.empty:
-    selected_id = int(selected_data.iloc[0]["id"])
-    matched = df[df["id"] == selected_id]
-    if not matched.empty:
-        _edit_transaction_dialog(matched.iloc[0])

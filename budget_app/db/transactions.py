@@ -81,6 +81,25 @@ def set_category(owner_email: str, transaction_id: int, category: str) -> None:
         session.commit()
 
 
+def set_notes(owner_email: str, transaction_id: int, notes: str) -> None:
+    conn = get_connection()
+    with conn.session as session:
+        session.execute(
+            text(
+                """
+                UPDATE transactions t
+                SET notes = :notes, updated_at = now()
+                FROM accounts a
+                WHERE t.account_id = a.id
+                  AND a.owner_email = :owner
+                  AND t.id = :transaction_id
+                """
+            ),
+            {"notes": notes or None, "owner": owner_email, "transaction_id": transaction_id},
+        )
+        session.commit()
+
+
 def set_lent_amount(owner_email: str, transaction_id: int, lent_amount: float) -> None:
     """Set the lent amount for a transaction (ownership verified via the
     account join). Does not touch settled status — that's a separate action."""
@@ -316,7 +335,7 @@ def list_transactions_with_lending(
     conn = get_connection()
     sql = """
         SELECT id, account_id, date, merchant, account_name, category, amount, lent_total,
-               adjusted_amount, lent_settled, lent_settled_date, has_unsettled_lend,
+               adjusted_amount, lent_settled, lent_settled_date, has_unsettled_lend, notes,
                refund_of_transaction_id, refund_of_merchant, refund_of_date,
                refunded_by_amount, refunded_by_date, refunded_by_transaction_id, refunded_by_merchant, occurred_on
         FROM transactions_full
@@ -357,7 +376,7 @@ def get_transaction(owner_email: str, transaction_id: int):
     df = conn.query(
         """
         SELECT id, account_id, date, merchant, account_name, category, amount, lent_total,
-               adjusted_amount, lent_settled, lent_settled_date, has_unsettled_lend,
+               adjusted_amount, lent_settled, lent_settled_date, has_unsettled_lend, notes,
                refund_of_transaction_id, refund_of_merchant, refund_of_date,
                refunded_by_amount, refunded_by_date, refunded_by_transaction_id, refunded_by_merchant, occurred_on
         FROM transactions_full
