@@ -1,148 +1,46 @@
-# 📊 Monthly Budget Automation App
+# 📊 Budget App
 
-A Streamlit app for turning raw credit card CSV statements into a clean monthly budgeting workflow.
-
-The app lets you upload one or more transaction CSV files, normalize them into a common transaction schema, categorize expenses with Google Gemini, review and correct the results in Streamlit, and then save the finalized data to Google Drive and Google Sheets.
-
-It is designed for a personal finance workflow where the main source of truth is a Google Sheet called `Personal_Budget`, backed by saved CSV copies in Google Drive.
+A Streamlit app for personal budgeting backed by Postgres, with automatic bank-transaction sync via Plaid and AI-assisted expense categorization via Google Gemini.
 
 ---
 
 ## What the app does
 
-This project automates the repetitive parts of monthly budgeting:
+1. Sign in with a Google account (restricted to an allowlist of emails, if configured).
+2. Connect bank accounts through Plaid Link and sync transactions automatically, or upload transaction CSV files by hand.
+3. Categorize transactions with Gemini, using a fixed category list, with manual override.
+4. Review, edit, and manage all transactions — categories, notes, lending status, and refund links.
+5. Browse spending trends and category breakdowns on the dashboard.
 
-1. Sign in with a Google account.
-2. Upload one or more credit card statement CSV files.
-3. Detect the statement source.
-4. Normalize all uploaded files into one consistent transaction table.
-5. Use Gemini to assign budget categories from a fixed category list.
-6. Let the user review and manually fix categories before saving.
-7. Append finalized transactions to a Google Sheet.
-8. Save finalized CSV copies into organized Google Drive folders.
-
-The goal is not just to preview transactions. The app creates and maintains a lightweight budgeting system using Google Drive and Google Sheets.
+All data lives in Postgres; there is no Google Sheets or Drive integration.
 
 ---
 
 ## Main features
 
-### Multi-file CSV upload
+### Google sign-in with an access allowlist
 
-The app accepts multiple `.csv` files at once through the Streamlit uploader. Each file is read into a Pandas dataframe and processed into a shared normalized format.
+The app requires Google OAuth login. If `access.allowed_emails` is set in secrets, anyone who signs in but isn't on the list is stopped before any page content, Plaid call, or Gemini call runs.
 
-For each uploaded file, the UI shows an account selector.
+### Bank sync via Plaid
 
-If `Other` is selected, the user can enter a custom account name. This account name is applied to all rows from that source file.
+From **Upload & Categorize**, a user can link a bank account through Plaid's hosted Link flow and sync transactions on demand. Access tokens are encrypted at rest. Syncing is incremental (cursor-based), filters out card payments/transfers, and removes transactions that were deleted at the bank.
+
+### Manual CSV upload
+
+Users can also upload one or more transaction CSV files. Each file is normalized into a common schema (source detection, date/amount parsing) before being merged with the rest.
 
 ### AI-powered categorization
 
-The app sends merchant names to Gemini and asks it to classify each merchant into one of these categories:
+Merchant names are sent to Gemini and classified into one of a fixed set of categories (see `budget_app/transactions/categories.py`). Requests are batched and deduplicated. Known merchant-to-category mappings are cached in the database so repeat merchants skip the Gemini call. Gemini request/response logs are written to the local `logs/` directory.
 
-- `Groceries`
-- `Transport`
-- `Eating out`
-- `Health & Wellness`
-- `Fun stuff`
-- `Gifts`
-- `Travel`
-- `Clothes`
-- `Charity`
-- `Other`
+### Transaction management
 
-The Gemini prompt is built as a batch prompt. Duplicate merchant names are deduplicated before the request, then mapped back to the original transaction rows.
+The **All Transactions** page supports editing categories and notes, marking transactions as lending (money owed back) and settling them, and linking refunds back to the original purchase.
 
-Gemini request and response logs are written to the local `logs/` directory:
+### Dashboard
 
-- `logs/prompt.txt`
-- `logs/response.txt`
-- `logs/raw_response.txt`
-
-### Review and manual correction
-
-After categorization, the app stores the processed dataframe in Streamlit session state and gives the user multiple review views:
-
-- Original uploaded table for each file.
-- Full processed transaction table.
-- Grouped transaction tables by category.
-
-The `category` column is editable through Streamlit `st.data_editor`. Most structural columns are locked so the user does not accidentally change the date, merchant, amount, account, or generated file name.
-
-When a category is edited inside a filtered category table, the app maps the change back to the main dataframe using the original row index.
-
-### Google Drive backup
-
-When the user clicks **Save to Google Drive & Sheets**, the app saves finalized CSV copies to Google Drive.
-
-Drive structure:
-
-```text
-Budget app/
-├── AMEX statements/
-│   └── AMEX_YYYYMMDD_YYYYMMDD.csv
-├── RBC statements/
-│   └── RBC_YYYYMMDD_YYYYMMDD.csv
-└── CUSTOM_ACCOUNT statements/
-    └── CUSTOM_ACCOUNT_YYYYMMDD_YYYYMMDD.csv
-```
-
-The generated file name follows this pattern:
-
-```text
-{ACCOUNT}_{latest_transaction_date}_{earliest_transaction_date}.csv
-```
-
-Example:
-
-```text
-AMEX_20260701_20260601.csv
-```
-
-If multiple source files are uploaded, the app splits the finalized dataframe by `source_file` and saves each group as a separate CSV file.
-
-### Google Sheets budgeting system
-
-The app creates or reuses a Google Sheet named:
-
-```text
-Personal_Budget
-```
-
-The spreadsheet is stored inside the `Budget app` Google Drive folder.
-
-The app manages three tabs:
-
-| Tab | Purpose |
-|---|---|
-| `CAD_Log` | Raw transaction log. New finalized rows are appended here. |
-| `Dashboard` | Monthly spending summary by budget category. |
-| `Accounts` | Monthly spending summary by account. |
-
----
-
-## Important behaviour to know
-
-### Extra tabs are deleted from `Personal_Budget`
-
-The spreadsheet template code keeps only these tabs:
-
-- `Dashboard`
-- `CAD_Log`
-- `Accounts`
-
-Any other tabs in the `Personal_Budget` spreadsheet are deleted when the template is enforced.
-
-Do not manually add extra tabs to this spreadsheet unless you also update the code.
-
-### Re-uploading the same statement can create duplicates
-
-The app appends rows to `CAD_Log`. It does not currently check whether the same transaction or same statement has already been saved.
-
-If you upload and save the same CSV twice, duplicate rows may be added.
-
-### Merchant data is sent to Gemini
-
-The app sends merchant names or transaction descriptions to Gemini for categorization. Do not use this app with financial data you are not comfortable sending to the configured Gemini API project.
+The **Dashboard** page shows spend-over-time and spend-by-category charts, with drill-down into the underlying transactions for a selected period/category.
 
 ---
 
@@ -150,103 +48,85 @@ The app sends merchant names or transaction descriptions to Gemini for categoriz
 
 | Area | Tools |
 |---|---|
-| Web app | Streamlit |
-| Data processing | Pandas |
+| Web app | Streamlit (multi-page) |
+| Data storage | Postgres via SQLAlchemy |
+| Bank data | Plaid |
 | AI categorization | Google Gemini API via `google-genai` |
 | Authentication | Google OAuth 2.0 via `requests-oauthlib` |
-| Google Drive | Google Drive API v3 via `googleapiclient` |
-| Google Sheets | Google Sheets API v4 via `googleapiclient` |
-| App state | Streamlit session state |
+| Data processing | Pandas |
+| Grids | `streamlit-aggrid` |
+| Charts | Altair |
 
 ---
 
 ## Project structure
 
-The source code is organized around app UI, transaction normalization, AI categorization, and Google integrations.
-
 ```text
 .
-├── app.py
+├── app.py                              # Entry point: login, allowlist gate, page nav
+├── pages/
+│   ├── dashboard.py                    # Spend charts and drill-down
+│   ├── upload.py                       # Plaid link/sync + manual CSV upload + categorization
+│   └── transactions.py                 # Browse/edit all transactions, lending, refunds
 ├── budget_app/
 │   ├── ai/
-│   │   └── gemini_category.py
+│   │   └── gemini_category.py          # Gemini prompts, batching, caching, logging
+│   ├── db/
+│   │   ├── engine.py                   # Postgres connection
+│   │   ├── accounts.py                 # Account lookup/creation
+│   │   ├── transactions.py             # Transaction CRUD, dedup, lending, refunds
+│   │   ├── dashboard.py                # Dashboard query helpers
+│   │   └── plaid.py                    # Plaid item storage, token encryption
 │   ├── google/
-│   │   ├── auth.py
-│   │   ├── clients.py
-│   │   ├── drive.py
-│   │   ├── save_pipeline.py
-│   │   ├── sheets.py
-│   │   └── spreadsheet_template.py
+│   │   └── auth.py                     # Google OAuth login/logout
+│   ├── plaid/
+│   │   ├── client.py                   # Plaid API client setup
+│   │   └── sync.py                     # Hosted Link + transaction sync
 │   └── transactions/
-│       └── normalize.py
-├── logs/
-├── README.md
-└── .streamlit/
-    └── secrets.toml
+│       ├── categories.py               # Fixed category list
+│       └── normalize.py                # CSV source detection + schema normalization
+├── logs/                               # Local Gemini request/response logs (gitignored)
+└── .streamlit/secrets.toml             # Local secrets (gitignored)
 ```
-
-### Key modules
-
-| File | Responsibility |
-|---|---|
-| `app.py` | Main Streamlit UI, upload flow, category editing, grouped views, save button. |
-| `budget_app/transactions/normalize.py` | Detects source files and converts raw CSVs into the standard transaction schema. |
-| `budget_app/ai/gemini_category.py` | Builds Gemini prompts, calls Gemini, extracts response text, caches categorization calls, and writes logs. |
-| `budget_app/google/auth.py` | Handles Google OAuth login, callback, session token storage, and logout. |
-| `budget_app/google/clients.py` | Creates Google Drive and Sheets service clients. |
-| `budget_app/google/drive.py` | Creates Drive folders and saves finalized CSV files. |
-| `budget_app/google/sheets.py` | Appends finalized transaction rows to `CAD_Log`. |
-| `budget_app/google/spreadsheet_template.py` | Creates or updates the `Personal_Budget` spreadsheet, tabs, formulas, and formatting. |
-| `budget_app/google/save_pipeline.py` | Coordinates the full save process across Sheets and Drive. |
 
 ---
 
-## How to use
+## Configuration
 
-1. Start the app.
-2. Sign in with Google.
-3. Upload one or more transaction CSV files.
-4. Confirm the account label for each file.
-5. Optional: open the original table to verify the raw upload.
-6. Wait for Gemini to categorize merchants.
-7. Review the processed table.
-8. Correct categories where needed.
-9. Review grouped category tables and totals.
-10. Click **Save to Google Drive & Sheets**.
-11. Open the generated Google Sheet or Drive folder from the success message.
+Secrets are read via `st.secrets` (`.streamlit/secrets.toml` locally, or the deployment's secrets store):
+
+```toml
+GEMINI_API_KEY = "..."
+GEMINI_MODEL = "..."
+
+[google_oauth]
+client_id = "..."
+client_secret = "..."
+redirect_uri = "http://localhost:8501/"   # optional, defaults shown
+
+[connections.postgres]
+url = "postgresql://..."
+
+[access]
+allowed_emails = ["you@example.com"]      # optional; omit to allow anyone who signs in
+
+[plaid]
+client_id = "..."
+secret = "..."
+env = "sandbox"                            # optional, defaults to "sandbox"
+token_encryption_key = "..."
+```
 
 ---
 
 ## Category list
 
-The app currently uses a fixed category list:
-
-```text
-Groceries
-Transport
-Eating out
-Health & Wellness
-Fun stuff
-Gifts
-Travel
-Clothes
-Charity
-Other
-```
-
-To change the list, update it in two places:
-
-1. The Gemini prompt in `gemini_category.py`.
-2. The Streamlit selectbox column options in `app.py`.
-
-If the spreadsheet dashboard should also reflect the new categories, update the dashboard headers and formulas in `spreadsheet_template.py`.
+Categories are defined in `budget_app/transactions/categories.py`. The dashboard assigns chart colors by list position, so reordering the list reassigns colors — append new categories at the end rather than reordering. To change the list, also update the Gemini prompt in `gemini_category.py`.
 
 ---
 
-
 ## Current limitations
 
-- Does not currently prevent duplicate transaction uploads.
 - Uses a fixed category list.
 - Sends merchant names to Gemini for categorization.
 - Stores Gemini prompts and responses in local log files.

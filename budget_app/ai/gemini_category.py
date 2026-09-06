@@ -152,7 +152,3 @@ def categorize_merchants(merchants: tuple, hints: tuple = None):
         result_map.update(_categorize_chunk(chunk, chunk_hints, LOGS_DIR))
 
     return [result_map.get(m, "") if m else "" for m in cleaned]
-
-
-def categorize_merchant(merchant: str) -> str:
-    return categorize_merchants((merchant,))[0] if merchant is not None else ""

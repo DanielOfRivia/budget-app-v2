@@ -27,14 +27,6 @@ def _get_or_create_account(session, owner_email: str, name: str) -> int:
     return row[0]
 
 
-def get_or_create_account(owner_email: str, name: str) -> int:
-    conn = get_connection()
-    with conn.session as session:
-        account_id = _get_or_create_account(session, owner_email, name)
-        session.commit()
-        return account_id
-
-
 def list_accounts(owner_email: str) -> pd.DataFrame:
     conn = get_connection()
     return conn.query(
