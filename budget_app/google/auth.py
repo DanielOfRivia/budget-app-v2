@@ -25,7 +25,12 @@ def login_to_google():
             'https://www.googleapis.com/auth/userinfo.profile', # To get user's name
             'https://www.googleapis.com/auth/userinfo.email'] # To get user's email
     
-    REDIRECT_URI = "https://danylo-budget-app.streamlit.app/"  if st.config.get_option("server.headless") else "http://localhost:8501/"
+    # Hardcoding one deployment's URL here breaks every other deployment of
+    # this same codebase — each one needs its own redirect_uri, since Google
+    # both displays it on the consent screen and sends the browser back to it
+    # after login. Configured per-deployment in that deployment's secrets;
+    # defaults to localhost for local dev.
+    REDIRECT_URI = st.secrets["google_oauth"].get("redirect_uri", "http://localhost:8501/")
 
     google = OAuth2Session(CLIENT_ID, scope=SCOPES, redirect_uri=REDIRECT_URI)
     
