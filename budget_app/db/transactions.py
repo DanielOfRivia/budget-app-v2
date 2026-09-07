@@ -397,11 +397,19 @@ def list_transactions_for_period(owner_email: str, month_start, month_end, categ
 
     Filtered on effective_date, not date, to match how the charts bucket
     months — otherwise a refund linked to an earlier purchase would be
-    missing from the very list you opened to explain that month's number."""
+    missing from the very list you opened to explain that month's number.
+
+    Selects the same column set as list_transactions_with_lending/
+    get_transaction — this list feeds the same shared edit dialog
+    (render_transactions_table), which needs all of it (account_id for
+    refund search, lent_settled/notes for those fields, both sides of a
+    refund link, etc.), not just what a read-only table would show."""
     conn = get_connection()
     sql = """
-        SELECT occurred_on, merchant, category, account_name, amount, lent_total, adjusted_amount,
-               refund_of_transaction_id, refunded_by_amount
+        SELECT id, account_id, occurred_on, merchant, category, account_name, amount, lent_total,
+               adjusted_amount, lent_settled, lent_settled_date, has_unsettled_lend, notes,
+               refund_of_transaction_id, refund_of_merchant, refund_of_date,
+               refunded_by_amount, refunded_by_date, refunded_by_transaction_id, refunded_by_merchant
         FROM transactions_full
         WHERE owner_email = :owner
           AND effective_date >= :month_start

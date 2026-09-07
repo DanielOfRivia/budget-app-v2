@@ -5,6 +5,7 @@ import streamlit as st
 from budget_app.db.dashboard import get_dashboard_transactions
 from budget_app.db.transactions import list_transactions_for_period
 from budget_app.transactions.categories import CATEGORIES
+from budget_app.transactions.table import render_transactions_table
 
 st.title("📊 Dashboard")
 
@@ -443,28 +444,11 @@ else:
     if detail.empty:
         st.info("No transactions in this period.")
     else:
-        shown = detail.copy()
-        shown["date"] = pd.to_datetime(shown["occurred_on"]).dt.strftime("%Y-%m-%d")
-        shown["Refund"] = [
-            "↩ refund" if pd.notna(r) else ("↩ refunded" if pd.notna(b) else "")
-            for r, b in zip(shown["refund_of_transaction_id"], shown["refunded_by_amount"])
-        ]
-        st.dataframe(
-            shown[["date", "merchant", "category", "account_name", "amount", "lent_total", "adjusted_amount", "Refund"]]
-            .rename(
-                columns={
-                    "date": "Date",
-                    "merchant": "Merchant",
-                    "category": "Category",
-                    "account_name": "Account",
-                    "amount": "Actual",
-                    "lent_total": "Lent",
-                    "adjusted_amount": "Adjusted",
-                }
-            ),
-            hide_index=True,
-            width="stretch",
-        )
+        detail["date"] = pd.to_datetime(detail["occurred_on"])
+        # Same table + same edit dialog as the All Transactions page (see
+        # render_transactions_table) — a click here saves through the exact
+        # same code path, category/comments/lending/refund-linking included.
+        render_transactions_table(owner_email, detail, key_prefix="dashboard_txn", height=250)
 
 
 # Scroll down to the list only when a click actually *changed* the selection.
