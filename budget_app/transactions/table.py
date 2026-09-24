@@ -1,3 +1,4 @@
+import requests
 import pandas as pd
 import streamlit as st
 from st_aggrid import AgGrid, GridOptionsBuilder
@@ -12,7 +13,12 @@ from budget_app.db.transactions import (
     set_notes,
     unlink_refund,
 )
+from budget_app.gps.visited_places import day_bounds_ms, fetch_visited_places, format_local_time
 from budget_app.transactions.categories import CATEGORIES
+
+# The GPS tracker is one person's personal phone, not an app-wide feature —
+# gated to this one account rather than shown to every user of the app.
+GPS_ENABLED_OWNER = "daniloustimenko@gmail.com"
 
 
 def _status(row):
@@ -128,6 +134,57 @@ def render_transactions_table(owner_email: str, df: pd.DataFrame, key_prefix: st
         m1, m2 = st.columns(2)
         m1.metric("Actual amount", f"${row['amount']:,.2f}")
         m2.metric("Adjusted amount", f"${row['adjusted_amount']:,.2f}")
+
+        if owner_email == GPS_ENABLED_OWNER:
+            gps_shown_key = f"gps_shown_{transaction_id}"
+            gps_data_key = f"gps_data_{transaction_id}"
+            gps_shown = st.session_state.get(gps_shown_key, False)
+            button_label = "🙈 Hide places visited that day" if gps_shown else "📍 Where was I that day?"
+            if st.button(button_label, key=f"gps_button_{transaction_id}", width="stretch"):
+                st.session_state[gps_shown_key] = not gps_shown
+                gps_shown = st.session_state[gps_shown_key]
+            if gps_shown:
+                # Fetched once per transaction id and cached in session_state —
+                # every other widget in this dialog triggers a full script
+                # rerun, and re-hitting a personal ngrok tunnel on each of
+                # those would be slow and pointless since the day's places
+                # don't change mid-edit.
+                if gps_data_key not in st.session_state:
+                    start_ms, end_ms = day_bounds_ms(row["date"])
+                    try:
+                        with st.spinner("Fetching visited places…"):
+                            st.session_state[gps_data_key] = fetch_visited_places(start_ms, end_ms)
+                    except requests.RequestException as e:
+                        st.session_state[gps_data_key] = e
+                places = st.session_state[gps_data_key]
+                if isinstance(places, Exception):
+                    st.error(f"Couldn't reach the location tracker: {places}")
+                elif not places:
+                    st.caption("No visited places recorded for this day.")
+                else:
+                    # Full alpha and a smaller radius — st.map's default dot
+                    # color is semi-transparent, which reads as washed-out at
+                    # this size.
+                    st.map(pd.DataFrame(places)[["latitude", "longitude"]], size=12, color="#D03B3BFF")
+                    for place in places:
+                        arrival = format_local_time(place["arrival_time"])
+                        departure = format_local_time(place["departure_time"])
+                        # The API resolves nearby Google Places POIs server-side;
+                        # a purely residential stay with nothing registered
+                        # nearby comes back with an empty list, not a missing
+                        # key, so falling back to the address is the normal
+                        # case for those, not an error case.
+                        business_names = [b["name"] for b in place.get("businesses") or []]
+                        if business_names:
+                            # A dense mixed-use building can return a dozen-plus
+                            # results within the 15m radius (observed: 16 at one
+                            # address) — showing all of them is unreadable.
+                            shown = business_names[:3]
+                            remainder = len(business_names) - len(shown)
+                            label = " / ".join(shown) + (f" (+{remainder} more)" if remainder else "")
+                            st.caption(f"**{label}** — {place['address']} — {arrival} to {departure}")
+                        else:
+                            st.caption(f"**{place['address']}** — {arrival} to {departure}")
 
         # Gemini/CSV categorization only ever runs pre-save — this is the only
         # way to fix a category after the fact. Falls back to "Other" if the
