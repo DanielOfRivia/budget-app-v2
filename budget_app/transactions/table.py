@@ -21,6 +21,13 @@ from budget_app.transactions.categories import CATEGORIES
 GPS_ENABLED_OWNER = "daniloustimenko@gmail.com"
 
 
+def _toggle_gps_place(selected_key, index):
+    # Runs as an on_click callback, before the dialog reruns, so the list
+    # renders with the new selection in the same pass instead of one click
+    # behind. Opening another stop replaces the selection, closing the old map.
+    st.session_state[selected_key] = None if st.session_state.get(selected_key) == index else index
+
+
 def _status(row):
     if row["lent_total"] == 0:
         return "—"
@@ -138,11 +145,14 @@ def render_transactions_table(owner_email: str, df: pd.DataFrame, key_prefix: st
         if owner_email == GPS_ENABLED_OWNER:
             gps_shown_key = f"gps_shown_{transaction_id}"
             gps_data_key = f"gps_data_{transaction_id}"
+            gps_selected_key = f"gps_selected_{transaction_id}"
             gps_shown = st.session_state.get(gps_shown_key, False)
             button_label = "🙈 Hide places visited that day" if gps_shown else "📍 Where was I that day?"
             if st.button(button_label, key=f"gps_button_{transaction_id}", width="stretch"):
                 st.session_state[gps_shown_key] = not gps_shown
                 gps_shown = st.session_state[gps_shown_key]
+                # Reopening the section starts with every map closed.
+                st.session_state.pop(gps_selected_key, None)
             if gps_shown:
                 # Fetched once per transaction id and cached in session_state —
                 # every other widget in this dialog triggers a full script
@@ -162,13 +172,15 @@ def render_transactions_table(owner_email: str, df: pd.DataFrame, key_prefix: st
                 elif not places:
                     st.caption("No visited places recorded for this day.")
                 else:
-                    # Full alpha and a smaller radius — st.map's default dot
-                    # color is semi-transparent, which reads as washed-out at
-                    # this size.
-                    st.map(pd.DataFrame(places)[["latitude", "longitude"]], size=12, color="#D03B3BFF")
-                    for place in places:
+                    # A chronological list, with a map only for the one stop
+                    # the user clicks — at most one map is open at a time, and
+                    # clicking the open stop again closes it.
+                    places = sorted(places, key=lambda p: p["arrival_time"])
+                    selected = st.session_state.get(gps_selected_key)
+                    for i, place in enumerate(places):
                         arrival = format_local_time(place["arrival_time"])
                         departure = format_local_time(place["departure_time"])
+                        label = f"{arrival} – {departure}"
                         # The API resolves nearby Google Places POIs server-side;
                         # a purely residential stay with nothing registered
                         # nearby comes back with an empty list, not a missing
@@ -181,10 +193,29 @@ def render_transactions_table(owner_email: str, df: pd.DataFrame, key_prefix: st
                             # address) — showing all of them is unreadable.
                             shown = business_names[:3]
                             remainder = len(business_names) - len(shown)
-                            label = " / ".join(shown) + (f" (+{remainder} more)" if remainder else "")
-                            st.caption(f"**{label}** — {place['address']} — {arrival} to {departure}")
-                        else:
-                            st.caption(f"**{place['address']}** — {arrival} to {departure}")
+                            more = f" (+{remainder} more)" if remainder else ""
+                            label += f" · **{' / '.join(shown)}{more}**"
+                        label += f" · {place['address']}"
+                        is_selected = i == selected
+                        st.button(
+                            ("▾ " if is_selected else "▸ ") + label,
+                            key=f"gps_place_{transaction_id}_{i}",
+                            type="primary" if is_selected else "secondary",
+                            width="stretch",
+                            on_click=_toggle_gps_place,
+                            args=(gps_selected_key, i),
+                        )
+                        if is_selected:
+                            # Every stop of the day stays on the map for context,
+                            # with the selected one larger and in full-alpha red
+                            # (st.map's default dot color is semi-transparent,
+                            # which reads as washed-out) and drawn last so it
+                            # sits on top of any overlapping grey dots.
+                            map_df = pd.DataFrame(places)[["latitude", "longitude"]]
+                            map_df["color"] = ["#D03B3BFF" if j == i else "#808080B0" for j in range(len(places))]
+                            map_df["size"] = [20 if j == i else 10 for j in range(len(places))]
+                            map_df = pd.concat([map_df.drop(index=i), map_df.loc[[i]]])
+                            st.map(map_df, color="color", size="size")
 
         # Gemini/CSV categorization only ever runs pre-save — this is the only
         # way to fix a category after the fact. Falls back to "Other" if the
